@@ -1,0 +1,25 @@
+# Per-device settings and keys (use the *.example.json files as templates)
+devices.json
+applpi.json
+
+# Built and downloaded images
+*.img
+*.img.xz
+*.zip
+deploy/
+work/
+
+# .NET
+bin/
+obj/
+*.user
+
+# Logs and backups
+*.log
+*.bak
+
+# Editors
+.vs/
+.idea/
+*.swp
+*~
