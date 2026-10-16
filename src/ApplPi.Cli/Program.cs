@@ -133,7 +133,7 @@ static class Program
         ImageWriter.Write(disk, image, new ConsoleProgress<WriteProgress>(progress =>
         {
             var line = $"\r{(progress.Verifying ? "Checking" : "Writing")} {progress.Fraction:P0}  " +
-                $"({progress.Bytes / (1 << 20)} MiB)   ";
+                $"({progress.Bytes / (1 << 20)} of {progress.Total / (1 << 20)} MiB)   ";
             if (line != lastShown)
             {
                 Console.Write(line);
@@ -204,9 +204,9 @@ static class Program
         {
             return 1;
         }
-        if (card.ReadRelease() is var (version, buildDate))
+        if (card.ReadRelease() is var (version, built))
         {
-            Console.WriteLine($"Image: ApplPi OS {version}, built {buildDate}");
+            Console.WriteLine($"Image: ApplPi OS {version}, build {built}");
         }
         if (card.ReadError() is { } error)
         {
@@ -231,7 +231,15 @@ static class Program
             return 1;
         }
         var keys = SshKeys.Read(keyFile);
-        var settings = new DeviceSettings(hostname, timeZone, wifi, keys);
+
+        // Each Pi keeps one host key, made here the first time, so reflashing it doesn't change its identity
+        var hostKey = store.Get(hostname)?.Settings.HostKey;
+        var hostPublicKey = store.GetHostPublicKey(hostname);
+        if (hostKey is null || hostPublicKey is null)
+        {
+            (hostKey, hostPublicKey) = SshKeys.CreateHostKey();
+        }
+        var settings = new DeviceSettings(hostname, timeZone, wifi, keys, hostKey);
         var errors = SettingsRules.Check(settings);
         if (errors.Count > 0)
         {
@@ -240,12 +248,13 @@ static class Program
         }
 
         card.WriteSettings(settings);
-        store.Set(settings, keyFile);
+        store.Set(settings, keyFile, hostPublicKey);
         store.Save(DeviceStore.DefaultPath);
+        SshKeys.TrustHostKey(SshKeys.DefaultKnownHostsFile, $"{hostname}.local", hostPublicKey);
 
         Console.WriteLine($"""
 
-            Settings for {hostname} are on the card ({card.Root}).
+            Settings for {hostname} are on the card ({card.Root}), and ssh on this PC knows its host key.
             Eject the card, put it in the Pi and power it on. After a few minutes (the first boot also sets up the card):
               ssh applpi@{hostname}.local
             """);

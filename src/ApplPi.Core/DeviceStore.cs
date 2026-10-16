@@ -40,11 +40,18 @@ public sealed class DeviceStore
         var wifi = device.WifiSsid is null
             ? null
             : new WifiSettings(device.WifiCountry ?? "", device.WifiSsid, Unprotect(device.WifiPassword));
-        return (new DeviceSettings(hostname, device.TimeZone, wifi, []), device.SshKeyFile);
+        var hostKey = device.HostKey is null ? null : Unprotect(device.HostKey);
+        return (new DeviceSettings(hostname, device.TimeZone, wifi, [], hostKey), device.SshKeyFile);
     }
 
-    /// <summary>Stores a Pi's settings (its SSH keys by the file they came from) and makes it the last one set up.</summary>
-    public void Set(DeviceSettings settings, string sshKeyFile)
+    /// <summary>The public half of a Pi's stored host key, or null.</summary>
+    public string? GetHostPublicKey(string hostname) => Devices.GetValueOrDefault(hostname)?.HostPublicKey;
+
+    /// <summary>
+    /// Stores a Pi's settings (its SSH keys by the file they came from, its host key encrypted) and makes it the last
+    /// one set up.
+    /// </summary>
+    public void Set(DeviceSettings settings, string sshKeyFile, string? hostPublicKey = null)
     {
         Devices[settings.Hostname] = new StoredDevice
         {
@@ -53,6 +60,8 @@ public sealed class DeviceStore
             WifiSsid = settings.Wifi?.Ssid,
             WifiPassword = settings.Wifi is null ? null : Protect(settings.Wifi.Password),
             SshKeyFile = sshKeyFile,
+            HostKey = settings.HostKey is null ? null : Protect(settings.HostKey),
+            HostPublicKey = hostPublicKey,
         };
         LastDevice = settings.Hostname;
     }
@@ -74,6 +83,12 @@ public sealed class StoredDevice
 
     /// <summary>Encrypted for the current Windows user (DPAPI), base64.</summary>
     public string? WifiPassword { get; set; }
+
+    /// <summary>The Pi's SSH host key (private), encrypted like <see cref="WifiPassword"/>.</summary>
+    public string? HostKey { get; set; }
+
+    /// <summary>The public half of <see cref="HostKey"/>, for known_hosts.</summary>
+    public string? HostPublicKey { get; set; }
 
     public string SshKeyFile { get; set; } = "";
 }

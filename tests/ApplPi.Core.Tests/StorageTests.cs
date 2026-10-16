@@ -28,9 +28,11 @@ public sealed class StorageTests : IDisposable
     {
         var card = new BootPartition(dir, "test");
         Assert.Null(card.ReadRelease());
+        File.WriteAllText(Path.Combine(dir, "applpi-release.txt"), "VERSION=v0.1.0\nCOMMIT=5e8e826\nBUILD_DATE=2026-10-16\n");
+        Assert.Equal(("v0.1.0", "2026-10-16"), card.ReadRelease());
         File.WriteAllText(Path.Combine(dir, "applpi-release.txt"),
-            "VERSION=v0.1.0-3-g1ad84dc\nCOMMIT=1ad84dc\nBUILD_DATE=2026-10-16\n");
-        Assert.Equal(("v0.1.0-3-g1ad84dc", "2026-10-16"), card.ReadRelease());
+            "VERSION=v0.1.0-3-g1ad84dc\nCOMMIT=1ad84dc\nBUILD_STAMP=20261016-2249\n");
+        Assert.Equal(("v0.1.0-3-g1ad84dc", "20261016-2249 UTC"), card.ReadRelease());
     }
 
     [Fact]
@@ -65,6 +67,99 @@ public sealed class StorageTests : IDisposable
         Assert.Equal("Europe/London", stored.TimeZone);
         Assert.Equal(@"C:\keys\id_ed25519.pub", keyFile);
         Assert.Null(loaded.Get("unknown"));
+    }
+
+    [Fact]
+    public void StoreKeepsTheHostKeyEncrypted()
+    {
+        var path = Path.Combine(dir, "devices.json");
+        var store = new DeviceStore();
+        store.Set(new DeviceSettings("applpi-test", null, null, [Key], HostKey), "key.pub", "ssh-ed25519 AAAAhost");
+        store.Save(path);
+
+        Assert.DoesNotContain("BEGIN OPENSSH", File.ReadAllText(path));
+        var loaded = DeviceStore.Load(path);
+        Assert.Equal(HostKey, loaded.Get("applpi-test")!.Value.Settings.HostKey);
+        Assert.Equal("ssh-ed25519 AAAAhost", loaded.GetHostPublicKey("applpi-test"));
+    }
+
+    [Fact]
+    public void TrustHostKeyReplacesWhatSshKnewForThatNameOnly()
+    {
+        var path = Path.Combine(dir, "known_hosts");
+        File.WriteAllLines(path, [
+            "other.local ssh-ed25519 AAAAother",
+            "applpi-test.local ssh-ed25519 AAAAold",
+            "applpi-test.local,192.0.2.1 ecdsa-sha2-nistp256 AAAAold2",
+        ]);
+
+        SshKeys.TrustHostKey(path, "applpi-test.local", "ssh-ed25519 AAAAnew");
+
+        Assert.Equal(["other.local ssh-ed25519 AAAAother", "applpi-test.local ssh-ed25519 AAAAnew"], File.ReadAllLines(path));
+    }
+
+    [Fact]
+    public void CreatesAHostKeyThePiAccepts()
+    {
+        var (privateKey, publicKey) = SshKeys.CreateHostKey();
+        Assert.Null(SettingsRules.CheckHostKey(privateKey));
+        Assert.DoesNotContain('\r', privateKey);
+        Assert.StartsWith("ssh-ed25519 AAAA", publicKey);
+        Assert.Equal(2, publicKey.Split(' ').Length);
+    }
+
+    const string HostKey = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\n-----END OPENSSH PRIVATE KEY-----\n";
+
+    [Fact]
+    public void ImageSizeIsWhereTheLastPartitionEnds()
+    {
+        // As our images: boot from 8 MiB (256 MiB), root A after it (1.25 GiB)
+        var sector = new byte[512];
+        sector[510] = 0x55;
+        sector[511] = 0xAA;
+        void Partition(int entry, uint start, uint sectors)
+        {
+            BitConverter.TryWriteBytes(sector.AsSpan(446 + entry * 16 + 8), start);
+            BitConverter.TryWriteBytes(sector.AsSpan(446 + entry * 16 + 12), sectors);
+        }
+        Partition(0, 16384, 524288);
+        Partition(1, 540672, 2621440);
+        Assert.Equal((540672L + 2621440) * 512, ImageWriter.ImageSize(sector));
+        Assert.Equal(0, ImageWriter.ImageSize(new byte[512]));
+    }
+
+    [Fact]
+    public void BlockMapGivesTheMappedPartsOfAChunk()
+    {
+        // bmaptool's format: whole blocks, inclusive ranges, single blocks without a dash
+        var map = BlockMap.Parse("""
+            <?xml version="1.0" ?>
+            <bmap version="2.0">
+                <ImageSize> 1610612736 </ImageSize>
+                <BlockSize> 4096 </BlockSize>
+                <BlocksCount> 393216 </BlocksCount>
+                <MappedBlocksCount> 5 </MappedBlocksCount>
+                <ChecksumType> sha256 </ChecksumType>
+                <BlockMap>
+                    <Range chksum="aa"> 0-1 </Range>
+                    <Range chksum="bb"> 1023 </Range>
+                    <Range chksum="cc"> 1025-1026 </Range>
+                </BlockMap>
+            </bmap>
+            """);
+        const int chunk = 4 << 20;
+        Assert.Equal([(0, 8192), (1023 * 4096, 4096)], map.Mapped(0, chunk));
+        Assert.Equal([(4096, 8192)], map.Mapped(chunk, chunk));
+        Assert.Empty(map.Mapped(2L * chunk, chunk));
+    }
+
+    [Fact]
+    public void BlockMapIsFoundBesideTheImage()
+    {
+        File.WriteAllText(Path.Combine(dir, "applpi-os-v0.1.0.bmap"),
+            "<bmap><BlockSize>4096</BlockSize><BlockMap><Range>0</Range></BlockMap></bmap>");
+        Assert.NotNull(BlockMap.ForImage(Path.Combine(dir, "applpi-os-v0.1.0.img.xz")));
+        Assert.Null(BlockMap.ForImage(Path.Combine(dir, "applpi-os-v0.2.0.img.xz")));
     }
 
     [Fact]

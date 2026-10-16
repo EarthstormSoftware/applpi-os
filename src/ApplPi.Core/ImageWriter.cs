@@ -6,14 +6,18 @@ using SharpCompress.Compressors.Xz;
 namespace ApplPi.Core;
 
 /// <param name="Verifying">False while writing, true while reading the card back.</param>
-/// <param name="Fraction">How far through the image, from 0 to 1.</param>
 /// <param name="Bytes">Bytes written (or checked) so far.</param>
-public readonly record struct WriteProgress(bool Verifying, double Fraction, long Bytes);
+/// <param name="Total">The image's size: where its last partition ends, from its partition table.</param>
+public readonly record struct WriteProgress(bool Verifying, long Bytes, long Total)
+{
+    public double Fraction => Total > 0 ? Math.Min(1, (double)Bytes / Total) : 0;
+}
 
 /// <summary>
 /// Writes an .img.xz image to a whole disk and reads it back to check it. Needs administrator rights. The card's
 /// partitions are dismounted and locked first, and the first block (the partition table) is written last, so Windows
-/// doesn't mount a half-written card.
+/// doesn't mount a half-written card. With a .bmap beside the image (see <see cref="BlockMap"/>), only the blocks
+/// holding data are written and checked: the file systems' free space, most of the image, is skipped.
 /// </summary>
 public static partial class ImageWriter
 {
@@ -27,6 +31,7 @@ public static partial class ImageWriter
         try
         {
             using var device = Open($@"\\.\PhysicalDrive{disk.Number}");
+            var map = BlockMap.ForImage(imagePath);
             var buffer = new AlignedBuffer(ChunkSize);
             try
             {
@@ -44,7 +49,10 @@ public static partial class ImageWriter
                     }
                     else
                     {
-                        RandomAccess.Write(device, buffer.Span[..length], offset);
+                        foreach (var (start, partLength) in Parts(map, offset, length))
+                        {
+                            RandomAccess.Write(device, buffer.Span.Slice(start, partLength), offset + start);
+                        }
                     }
                     offset += length;
                 }
@@ -53,10 +61,13 @@ public static partial class ImageWriter
                     throw new InvalidOperationException("The image is empty.");
                 }
                 firstChunk.CopyTo(buffer.Span);
-                RandomAccess.Write(device, buffer.Span[..firstChunk.Length], 0);
+                foreach (var (start, partLength) in Parts(map, 0, firstChunk.Length))
+                {
+                    RandomAccess.Write(device, buffer.Span.Slice(start, partLength), start);
+                }
                 FlushFileBuffers(device);
 
-                Verify(device, imagePath, buffer, progress);
+                Verify(device, imagePath, map, buffer, progress);
                 // Windows reads the new partition table and mounts the boot partition
                 DeviceIoControl(device, IoctlDiskUpdateProperties);
             }
@@ -71,20 +82,31 @@ public static partial class ImageWriter
         }
     }
 
-    static void Verify(SafeFileHandle device, string imagePath, AlignedBuffer imageChunk, IProgress<WriteProgress>? progress)
+    static void Verify(SafeFileHandle device, string imagePath, BlockMap? map, AlignedBuffer imageChunk,
+        IProgress<WriteProgress>? progress)
     {
         using var cardChunk = new AlignedBuffer(ChunkSize);
         long offset = 0;
         foreach (var length in Chunks(imagePath, imageChunk, progress, verifying: true, () => offset))
         {
-            var read = RandomAccess.Read(device, cardChunk.Span[..length], offset);
-            if (read != length || !cardChunk.Span[..length].SequenceEqual(imageChunk.Span[..length]))
+            // Only what was written is checked
+            foreach (var (start, partLength) in Parts(map, offset, length))
             {
-                throw new IOException($"The card doesn't match the image at {offset / (1 << 20)} MiB: it may be faulty.");
+                var card = cardChunk.Span.Slice(start, partLength);
+                if (RandomAccess.Read(device, card, offset + start) != partLength
+                    || !card.SequenceEqual(imageChunk.Span.Slice(start, partLength)))
+                {
+                    throw new IOException(
+                        $"The card doesn't match the image at {(offset + start) / (1 << 20)} MiB: it may be faulty.");
+                }
             }
             offset += length;
         }
     }
+
+    /// <summary>The parts of a chunk to write: those the block map lists, or all of it without one.</summary>
+    static IEnumerable<(int Start, int Length)> Parts(BlockMap? map, long offset, int length) =>
+        map?.Mapped(offset, length) ?? [(0, length)];
 
     /// <summary>
     /// Decompresses the image into the buffer a chunk at a time, yielding each chunk's length (padded with zeros to
@@ -95,6 +117,7 @@ public static partial class ImageWriter
     {
         using var file = File.OpenRead(imagePath);
         using var image = new XZStream(file);
+        long total = 0;
         while (true)
         {
             var length = 0;
@@ -109,9 +132,35 @@ public static partial class ImageWriter
             }
             var padded = (length + SectorSize - 1) / SectorSize * SectorSize;
             buffer.Span[length..padded].Clear();
-            progress?.Report(new WriteProgress(verifying, (double)file.Position / file.Length, offset()));
+            if (total == 0)
+            {
+                total = ImageSize(buffer.Span[..padded]);
+            }
+            progress?.Report(new WriteProgress(verifying, offset(), total));
             yield return padded;
         }
+    }
+
+    /// <summary>
+    /// The image's size from the MBR partition table in its first sector: where its last partition ends. (The .xz
+    /// file doesn't say how big the image is until its end, and how far through the compressed file says little: the
+    /// image ends in an empty file system that compresses to almost nothing.) 0 if there's no partition table.
+    /// </summary>
+    public static long ImageSize(ReadOnlySpan<byte> firstSector)
+    {
+        if (firstSector.Length < 512 || firstSector[510] != 0x55 || firstSector[511] != 0xAA)
+        {
+            return 0;
+        }
+        long end = 0;
+        for (var entry = 0; entry < 4; entry++)
+        {
+            var partition = firstSector.Slice(446 + entry * 16, 16);
+            long start = BitConverter.ToUInt32(partition[8..12]);
+            long sectors = BitConverter.ToUInt32(partition[12..16]);
+            end = Math.Max(end, (start + sectors) * 512);
+        }
+        return end;
     }
 
     static SafeFileHandle LockVolume(char letter)

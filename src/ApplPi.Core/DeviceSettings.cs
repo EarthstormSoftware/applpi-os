@@ -8,7 +8,9 @@ namespace ApplPi.Core;
 /// <param name="TimeZone">An IANA time zone, such as Europe/London, or null to keep UTC.</param>
 /// <param name="Wifi">The Wi-Fi network, or null for Ethernet only.</param>
 /// <param name="SshKeys">The SSH public keys that can log in as the applpi user.</param>
-public sealed record DeviceSettings(string Hostname, string? TimeZone, WifiSettings? Wifi, IReadOnlyList<string> SshKeys)
+/// <param name="HostKey">The Pi's own SSH host key (OpenSSH private key), or null to let the Pi make one.</param>
+public sealed record DeviceSettings(string Hostname, string? TimeZone, WifiSettings? Wifi, IReadOnlyList<string> SshKeys,
+    string? HostKey = null)
 {
     static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -18,14 +20,16 @@ public sealed record DeviceSettings(string Hostname, string? TimeZone, WifiSetti
 
     /// <summary>The applpi.json the Pi reads (see image\applpi.example.json).</summary>
     public string ToJson() => JsonSerializer.Serialize(
-        new CardFile(Hostname, TimeZone, Wifi is null ? null : new CardWifi(Wifi.Country, Wifi.Ssid, Wifi.Password), SshKeys),
+        new CardFile(Hostname, TimeZone, Wifi is null ? null : new CardWifi(Wifi.Country, Wifi.Ssid, Wifi.Password), SshKeys,
+            HostKey),
         JsonOptions);
 
     sealed record CardFile(
         [property: JsonPropertyName("hostname")] string Hostname,
         [property: JsonPropertyName("timezone")] string? TimeZone,
         [property: JsonPropertyName("wifi")] CardWifi? Wifi,
-        [property: JsonPropertyName("ssh_keys")] IReadOnlyList<string> SshKeys);
+        [property: JsonPropertyName("ssh_keys")] IReadOnlyList<string> SshKeys,
+        [property: JsonPropertyName("host_key")] string? HostKey);
 
     sealed record CardWifi(
         [property: JsonPropertyName("country")] string Country,

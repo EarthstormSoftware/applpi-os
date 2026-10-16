@@ -70,6 +70,23 @@ public class SettingsTests
     }
 
     [Fact]
+    public void RejectsAHostKeyThatIsntAPrivateKey()
+    {
+        Assert.NotNull(SettingsRules.CheckHostKey(Key));
+        Assert.NotEmpty(SettingsRules.Check(Valid() with { HostKey = "not a key" }));
+    }
+
+    [Fact]
+    public void WritesTheHostKeyOnlyWhenThereIsOne()
+    {
+        const string hostKey = "-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n-----END OPENSSH PRIVATE KEY-----\n";
+        using var with = JsonDocument.Parse((Valid() with { HostKey = hostKey }).ToJson());
+        Assert.Equal(hostKey, with.RootElement.GetProperty("host_key").GetString());
+        using var without = JsonDocument.Parse(Valid().ToJson());
+        Assert.False(without.RootElement.TryGetProperty("host_key", out _));
+    }
+
+    [Fact]
     public void LeavesOutWifiForEthernetOnly()
     {
         using var json = JsonDocument.Parse((Valid() with { Wifi = null }).ToJson());

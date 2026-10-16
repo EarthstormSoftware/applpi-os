@@ -62,7 +62,9 @@ Windows can't write ext4, so the flash tool writes the device's settings to `app
 (format: `image\applpi.example.json`): hostname, time zone, Wi-Fi country, network and password, SSH public key(s).
 At boot, `applpi-settings.service` checks the file, moves the settings to the data partition (keeping the Wi-Fi key
 made from the password, not the password) and deletes `applpi.json`, so the password doesn't stay on the FAT
-partition. If the file is wrong, it is deleted anyway and the reason is left in `applpi-error.txt` on the boot
+partition. `applpi.json` can also carry the Pi's SSH host key: `applpi` makes one per Pi, keeps it (encrypted) with
+the Pi's settings and adds it to `known_hosts`, so a reflashed Pi keeps its identity; without one, the Pi makes its
+own. If the file is wrong, it is deleted anyway and the reason is left in `applpi-error.txt` on the boot
 partition. Then, at every boot, it sets the hostname, time zone, Wi-Fi and SSH keys from the data partition: the root
 is read-only, so they are written to RAM.
 
@@ -70,10 +72,17 @@ Per-device details are kept outside the repo, in `%APPDATA%\ApplPi` (only `*.exa
 
 ### OS updates (A/B)
 
-An update writes the new image into the slot that isn't running, over SSH, then switches `os_prefix` and reboots.
-After boot, a check confirms the new slot (Wi-Fi up, SSH answering); if that doesn't happen within a few minutes,
-the Pi switches back to the old slot and reboots. A kernel that doesn't boot at all can't switch back by itself:
-then the card goes in the PC and the one line in `config.txt` is changed back.
+An update writes the new image into the slot that isn't running, over SSH (root partition and the slot's boot
+files), then tries it once with the firmware's tryboot: `tryboot.txt` names the new slot (`os_prefix=slotB/`) and the
+Pi reboots with `systemctl --reboot-argument="0 tryboot" reboot` (the usual `reboot "0 tryboot"` form is rejected).
+The new slot sees it was tried (`/proc/device-tree/chosen/bootloader/tryboot` is 1) and, once healthy (Wi-Fi up, SSH
+answering), makes itself permanent by switching `config.txt`. Any reset before that (the hardware watchdog if it
+hangs, a power cut, a kernel that doesn't start) boots `config.txt`, the old slot, again. Checked on the Pi 2 (firmware
+of Sep 2026): tryboot.txt was used for exactly one boot.
+
+Before this works, nothing may name the image's own partition IDs: `cmdline.txt` and `fstab` use the PARTUUIDs of the
+image they came from, which an update to another image changes. They have to come from the card itself, as the data
+partition's mount does.
 
 ### Apps
 
@@ -98,7 +107,8 @@ then the card goes in the PC and the one line in `config.txt` is changed back.
 - Versions are semantic (`vMAJOR.MINOR.PATCH`) and come from git tags, for the image and the `applpi` tool alike:
   `git describe` gives `v0.1.0` for a release and `v0.1.0-3-g1ad84dc` (plus `-dirty` for uncommitted changes) for a
   development build. Major: something apps rely on changes; minor: features and new libraries; patch: fixes. 0.x
-  until the app manifest and OS updates are settled. Each image records `VERSION`, `COMMIT` and `BUILD_DATE` in
+  until the app manifest and OS updates are settled. Each image records `VERSION`, `COMMIT` and `BUILD_STAMP` (UTC,
+  `20261016-2249`; `v0.1.0` has `BUILD_DATE`) in
   `/etc/applpi-release` and in `applpi-release.txt` on the boot partition, shows them on the console, and is named
   `applpi-os-<version>.img.xz`.
 - The Synology DS420+ was ruled out as a builder: 2 cores emulating ARM, and an old (4.4) kernel that may lack the

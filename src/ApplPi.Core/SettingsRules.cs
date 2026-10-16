@@ -20,6 +20,13 @@ public static partial class SettingsRules
                     @"|sk-ecdsa-sha2-nistp256@openssh\.com) [A-Za-z0-9+/]+=*( [^\r\n]*)?$")]
     private static partial Regex SshKeyPattern();
 
+    [GeneratedRegex(@"^-----BEGIN OPENSSH PRIVATE KEY-----\n[A-Za-z0-9+/=\n]+-----END OPENSSH PRIVATE KEY-----\n?$")]
+    private static partial Regex HostKeyPattern();
+
+    public static string? CheckHostKey(string hostKey) => HostKeyPattern().IsMatch(hostKey.Replace("\r\n", "\n").Trim() + "\n")
+        ? null
+        : "The host key must be an OpenSSH private key.";
+
     public static string? CheckHostname(string hostname) => HostnamePattern().IsMatch(hostname)
         ? null
         : "The name must be 1-63 lower-case letters, digits and hyphens, not starting or ending with a hyphen.";
@@ -62,6 +69,10 @@ public static partial class SettingsRules
         }
         errors.Add(settings.SshKeys.Count == 0 ? "At least one SSH key is needed: it's the only way in." : null);
         errors.AddRange(settings.SshKeys.Select(CheckSshKey));
+        if (settings.HostKey is not null)
+        {
+            errors.Add(CheckHostKey(settings.HostKey));
+        }
         return errors.OfType<string>().Distinct().ToList();
     }
 }

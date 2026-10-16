@@ -16,10 +16,11 @@ public sealed class BootPartition(string root, string description)
     public bool HasPendingSettings => File.Exists(Path.Combine(Root, SettingsFile));
 
     /// <summary>
-    /// The image's version and build date, from applpi-release.txt (KEY=value lines, as /etc/applpi-release on the
-    /// Pi), or null for images made before it was added.
+    /// The image's version and when it was built (BUILD_STAMP, UTC, such as 20261016-2249; v0.1.0 has BUILD_DATE
+    /// instead), from applpi-release.txt (KEY=value lines, as /etc/applpi-release on the Pi), or null for images made
+    /// before it was added.
     /// </summary>
-    public (string Version, string BuildDate)? ReadRelease()
+    public (string Version, string Built)? ReadRelease()
     {
         var path = Path.Combine(Root, "applpi-release.txt");
         if (!File.Exists(path))
@@ -30,7 +31,8 @@ public sealed class BootPartition(string root, string description)
             .Select(line => line.Split('=', 2))
             .Where(pair => pair.Length == 2)
             .ToDictionary(pair => pair[0].Trim(), pair => pair[1].Trim());
-        return (values.GetValueOrDefault("VERSION", "unknown"), values.GetValueOrDefault("BUILD_DATE", "unknown"));
+        var built = values.TryGetValue("BUILD_STAMP", out var stamp) ? $"{stamp} UTC" : values.GetValueOrDefault("BUILD_DATE", "unknown");
+        return (values.GetValueOrDefault("VERSION", "unknown"), built);
     }
 
     /// <summary>Why the Pi didn't use the last settings it was given (left on the card by the Pi), or null.</summary>
