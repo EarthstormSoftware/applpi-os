@@ -1,0 +1,23 @@
+#!/bin/bash
+# The SSH login screen (/etc/update-motd.d/00-applpi): cleared, then the apple beside the same information as the
+# console's (/etc/issue)
+. /etc/applpi-release
+ipv4=$(ip -o -4 addr show scope global | awk '{ split($4, a, "/"); print a[1]; exit }')
+ipv6=$(ip -o -6 addr show scope global | awk '{ split($4, a, "/"); print a[1]; exit }')
+info=(
+	""
+	$'\e[32mApplPi OS\e[0m '"${VERSION}, build ${BUILD_STAMP} UTC"
+	""
+	"Name      $(hostname).local"
+	"IPv4      ${ipv4:-none}"
+	"IPv6      ${ipv6:-none}"
+)
+mapfile -t logo < /usr/share/applpi/logo.ansi
+blank=$(printf '%*s' "$(sed 's/\x1b\[[0-9;]*m//g' <<< "${logo[0]}" | wc -m)" '')
+
+printf '\e[H\e[2J\n'
+lines=$(( ${#logo[@]} > ${#info[@]} ? ${#logo[@]} : ${#info[@]} ))
+for (( i = 0; i < lines; i++ )); do
+	printf '%s   %s\n' "${logo[$i]:-$blank}" "${info[$i]:-}"
+done
+echo

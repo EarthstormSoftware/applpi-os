@@ -41,5 +41,12 @@ on_chroot <<- EOF
 	systemctl enable applpi-console-logo.service
 EOF
 
+# The SSH login screen: cleared, then the apple (pixel art, as coloured half blocks) beside the same information as
+# the console. Debian's uname line, overlayroot's mount table and the licence text go.
+awk -f files/ansi-logo.awk files/apple.txt > "${ROOTFS_DIR}/usr/share/applpi/logo.ansi"
+install -m 755 files/motd "${ROOTFS_DIR}/etc/update-motd.d/00-applpi"
+chmod -x "${ROOTFS_DIR}/etc/update-motd.d/10-uname" "${ROOTFS_DIR}/etc/update-motd.d/97-overlayroot"
+: > "${ROOTFS_DIR}/etc/motd"
+
 . "${ROOTFS_DIR}/etc/applpi-release"
 sed "s/@VERSION@/${VERSION}/; s/@BUILD_STAMP@/${BUILD_STAMP}/" files/issue > "${ROOTFS_DIR}/etc/issue"
