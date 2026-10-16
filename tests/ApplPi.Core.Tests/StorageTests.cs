@@ -24,6 +24,16 @@ public sealed class StorageTests : IDisposable
     }
 
     [Fact]
+    public void BootPartitionReadsTheImageRelease()
+    {
+        var card = new BootPartition(dir, "test");
+        Assert.Null(card.ReadRelease());
+        File.WriteAllText(Path.Combine(dir, "applpi-release.txt"),
+            "VERSION=v0.1.0-3-g1ad84dc\nCOMMIT=1ad84dc\nBUILD_DATE=2026-10-16\n");
+        Assert.Equal(("v0.1.0-3-g1ad84dc", "2026-10-16"), card.ReadRelease());
+    }
+
+    [Fact]
     public void BootPartitionRefusesSettingsThePiWouldReject() => Assert.Throws<ArgumentException>(
         () => new BootPartition(dir, "test").WriteSettings(new DeviceSettings("Bad_Name", null, null, [Key])));
 

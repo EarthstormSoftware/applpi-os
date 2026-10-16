@@ -95,6 +95,12 @@ then the card goes in the PC and the one line in `config.txt` is changed back.
   container, from a tag for releases or by hand from any branch for test builds. Each release keeps its image
   (compressed) and checksum. A rebuild fetches whatever packages are current, so the kept images, not the build,
   are what's frozen.
+- Versions are semantic (`vMAJOR.MINOR.PATCH`) and come from git tags, for the image and the `applpi` tool alike:
+  `git describe` gives `v0.1.0` for a release and `v0.1.0-3-g1ad84dc` (plus `-dirty` for uncommitted changes) for a
+  development build. Major: something apps rely on changes; minor: features and new libraries; patch: fixes. 0.x
+  until the app manifest and OS updates are settled. Each image records `VERSION`, `COMMIT` and `BUILD_DATE` in
+  `/etc/applpi-release` and in `applpi-release.txt` on the boot partition, shows them on the console, and is named
+  `applpi-os-<version>.img.xz`.
 - The Synology DS420+ was ruled out as a builder: 2 cores emulating ARM, and an old (4.4) kernel that may lack the
   `binfmt_misc` support the build needs. It is a good place to keep a copy of the images.
 - While developing, changes are tried on the test Pi first (temporarily writable), then put into the build, so a
@@ -126,7 +132,11 @@ copied onto the boot partition by hand. The GitHub Actions workflow comes once t
 - Done: `applpi setup [name]` asks for the Pi's name, Wi-Fi and time zone (defaults from the last Pi), makes an SSH
   key if there isn't one, and writes `applpi.json` to an ApplPi card's boot partition, checked against the same rules
   as the Pi. Settings are kept in `%APPDATA%\ApplPi\devices.json`, Wi-Fi passwords encrypted with DPAPI.
-- Next: `applpi flash`, writing the image first.
+- Done: `applpi flash [image]` writes the image (default: the newest in `deploy\`) and reads it back to check it,
+  then carries on as `setup`. It only offers disks on the USB or SD bus that Windows calls removable media and that
+  aren't the system or boot disk, shows their name, size and drive letters, and needs ERASE typed to write. It asks
+  for administrator rights (UAC) and continues in a new window. The partition table is written last, so Windows
+  doesn't mount a half-written card.
 
 ### 3. Apps
 

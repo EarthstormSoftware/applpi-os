@@ -1,4 +1,8 @@
-﻿using System.Globalization;
+﻿using System.ComponentModel;
+using System.Diagnostics;
+using System.Globalization;
+using System.Reflection;
+using System.Security.Principal;
 using System.Text;
 using ApplPi.Core;
 
@@ -10,9 +14,13 @@ static class Program
         applpi: sets up Raspberry Pis running ApplPi OS
 
         Usage:
+          applpi flash [image]  Write the ApplPi OS image to a card in this PC's card reader, check it, then set it
+                                up as below. The image defaults to the newest deploy\applpi-os-*.img.xz. Asks for
+                                administrator rights; only card readers are offered, and you confirm before writing.
           applpi setup [name]   Ask for a Pi's settings (name, Wi-Fi, time zone, SSH key) and put them on its card.
                                 Works on a card written with the ApplPi OS image, in this PC's card reader.
                                 The Pi reads them at its next boot, then deletes them from the card.
+          applpi --version      Show this tool's version.
 
         Settings are remembered in %APPDATA%\ApplPi (Wi-Fi passwords encrypted for your Windows account).
         """;
@@ -23,8 +31,13 @@ static class Program
         {
             return args switch
             {
-                ["setup"] => Setup(null),
-                ["setup", var name] => Setup(name),
+                ["setup"] => Setup(null, ChooseCard()),
+                ["setup", var name] => Setup(name, ChooseCard()),
+                ["flash"] => Flash(null, elevated: false),
+                ["flash", "--elevated"] => Flash(null, elevated: true),
+                ["flash", var image] => Flash(image, elevated: false),
+                ["flash", var image, "--elevated"] => Flash(image, elevated: true),
+                ["--version"] => ShowVersion(),
                 _ => ShowUsage(),
             };
         }
@@ -35,18 +48,165 @@ static class Program
         }
     }
 
+    static int ShowVersion()
+    {
+        Console.WriteLine(typeof(Program).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown");
+        return 0;
+    }
+
     static int ShowUsage()
     {
         Console.WriteLine(Usage);
         return 2;
     }
 
-    static int Setup(string? name)
+    static int Flash(string? image, bool elevated)
     {
-        var card = ChooseCard();
+        image ??= Directory.Exists("deploy")
+            ? Directory.GetFiles("deploy", "applpi-os-*.img.xz").OrderBy(File.GetLastWriteTimeUtc).LastOrDefault()
+            : null;
+        if (image is null || !File.Exists(image))
+        {
+            Console.Error.WriteLine(image is null
+                ? "No image found in deploy\\: build one with image\\build.ps1, or name the .img.xz file."
+                : $"No such image: {image}");
+            return 1;
+        }
+        image = Path.GetFullPath(image);
+
+        if (!elevated)
+        {
+            // The SSH key is made as this user, before asking for administrator rights (OpenSSH checks who owns it)
+            if (!File.Exists(SshKeys.DefaultPublicKeyFile) && !CreateKey(SshKeys.DefaultPublicKeyFile))
+            {
+                return 1;
+            }
+            if (!IsAdministrator())
+            {
+                return RunElevated(["flash", image, "--elevated"]);
+            }
+        }
+
+        var result = WriteCard(image);
+        if (elevated)
+        {
+            Console.WriteLine();
+            Console.Write("Press Enter to close this window.");
+            Console.ReadLine();
+        }
+        return result;
+    }
+
+    static int WriteCard(string image)
+    {
+        Console.WriteLine($"Image: {Path.GetFileName(image)}");
+        var disks = RemovableDisk.FindAll();
+        if (disks.Count == 0)
+        {
+            Console.Error.WriteLine("No card found: put the card in the card reader and try again.");
+            return 1;
+        }
+        Console.WriteLine("Cards in card readers:");
+        foreach (var candidate in disks)
+        {
+            Console.WriteLine($"  {candidate.Description}");
+        }
+        var numbers = disks.Select(candidate => candidate.Number.ToString(CultureInfo.InvariantCulture)).ToList();
+        var chosen = Ask("Write to disk number", disks.Count == 1 ? numbers[0] : null,
+            answer => numbers.Contains(answer) ? null : $"Choose one of: {string.Join(", ", numbers)}.");
+        var disk = disks.Single(candidate => candidate.Number.ToString(CultureInfo.InvariantCulture) == chosen);
+
+        Console.WriteLine($"""
+
+            Everything on this card will be erased:
+              {disk.Description}
+            """);
+        Console.Write("Type ERASE to write the image to it: ");
+        if (Console.ReadLine()?.Trim() != "ERASE")
+        {
+            Console.WriteLine("Stopped: nothing was written.");
+            return 1;
+        }
+
+        var lastShown = "";
+        ImageWriter.Write(disk, image, new ConsoleProgress<WriteProgress>(progress =>
+        {
+            var line = $"\r{(progress.Verifying ? "Checking" : "Writing")} {progress.Fraction:P0}  " +
+                $"({progress.Bytes / (1 << 20)} MiB)   ";
+            if (line != lastShown)
+            {
+                Console.Write(line);
+                lastShown = line;
+            }
+        }));
+        Console.WriteLine("\rWritten and checked.                          ");
+
+        var card = WaitForBootPartition(disk.Number);
+        if (card is null)
+        {
+            Console.Error.WriteLine("Windows didn't show the card's boot partition: take the card out, put it back " +
+                "in and run applpi setup.");
+            return 1;
+        }
+        return Setup(null, card);
+    }
+
+    /// <summary>The boot partition of the card just written, once Windows has mounted it.</summary>
+    static BootPartition? WaitForBootPartition(int diskNumber)
+    {
+        for (var attempt = 0; attempt < 30; attempt++)
+        {
+            var letters = RemovableDisk.FindAll().FirstOrDefault(disk => disk.Number == diskNumber)?.DriveLetters ?? [];
+            var root = letters.Select(letter => $@"{letter}:\").FirstOrDefault(BootPartition.IsApplPi);
+            if (root is not null)
+            {
+                return new BootPartition(root, $"{root.TrimEnd('\\')} (boot partition)");
+            }
+            Thread.Sleep(1000);
+        }
+        return null;
+    }
+
+    /// <summary>Reports progress on the calling thread (Progress&lt;T&gt; would post it to the thread pool, out of order).</summary>
+    sealed class ConsoleProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
+    }
+
+    static bool IsAdministrator() =>
+        new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
+
+    /// <summary>Runs this program again with administrator rights (Windows asks first), in its own window.</summary>
+    static int RunElevated(string[] args)
+    {
+        Console.WriteLine("Writing a card needs administrator rights: continuing in a new window.");
+        try
+        {
+            using var elevated = Process.Start(new ProcessStartInfo(Environment.ProcessPath!, args)
+            {
+                UseShellExecute = true,
+                Verb = "runas",
+            })!;
+            elevated.WaitForExit();
+            return elevated.ExitCode;
+        }
+        catch (Win32Exception)
+        {
+            Console.Error.WriteLine("Administrator rights weren't given: nothing was written.");
+            return 1;
+        }
+    }
+
+    static int Setup(string? name, BootPartition? card)
+    {
         if (card is null)
         {
             return 1;
+        }
+        if (card.ReadRelease() is var (version, buildDate))
+        {
+            Console.WriteLine($"Image: ApplPi OS {version}, built {buildDate}");
         }
         if (card.ReadError() is { } error)
         {

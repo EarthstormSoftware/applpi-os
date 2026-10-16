@@ -16,15 +16,17 @@ as a Pico W, with Python, the network, USB and GPIO.
 
 ## Setting up a Pi
 
-Write the image to a card (for now with Raspberry Pi Imager, "Use custom", no customisation), leave the card in the
-PC and run:
+Put the card in the PC's card reader and run:
 
 ```powershell
-dotnet run --project src\ApplPi.Cli -- setup
+dotnet run --project src\ApplPi.Cli -- flash
 ```
 
-It asks for the Pi's name, Wi-Fi and time zone, makes an SSH key if you don't have one, and puts the settings on the
-card. Then boot the Pi with it and, after a few minutes, `ssh applpi@<name>.local`.
+It writes the newest image in `deploy\` to the card (only card readers are offered, and you confirm first), checks
+it, then asks for the Pi's name, Wi-Fi and time zone, makes an SSH key if you don't have one, and puts the settings
+on the card. Then boot the Pi with it and, after a few minutes, `ssh applpi@<name>.local`.
+
+To change the settings on a card that's already written: `dotnet run --project src\ApplPi.Cli -- setup`.
 
 ## Building the image
 

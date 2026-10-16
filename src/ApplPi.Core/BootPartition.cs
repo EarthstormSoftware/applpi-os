@@ -15,6 +15,24 @@ public sealed class BootPartition(string root, string description)
     /// <summary>Whether settings are waiting on the card for the Pi to read at its next boot.</summary>
     public bool HasPendingSettings => File.Exists(Path.Combine(Root, SettingsFile));
 
+    /// <summary>
+    /// The image's version and build date, from applpi-release.txt (KEY=value lines, as /etc/applpi-release on the
+    /// Pi), or null for images made before it was added.
+    /// </summary>
+    public (string Version, string BuildDate)? ReadRelease()
+    {
+        var path = Path.Combine(Root, "applpi-release.txt");
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+        var values = File.ReadAllLines(path)
+            .Select(line => line.Split('=', 2))
+            .Where(pair => pair.Length == 2)
+            .ToDictionary(pair => pair[0].Trim(), pair => pair[1].Trim());
+        return (values.GetValueOrDefault("VERSION", "unknown"), values.GetValueOrDefault("BUILD_DATE", "unknown"));
+    }
+
     /// <summary>Why the Pi didn't use the last settings it was given (left on the card by the Pi), or null.</summary>
     public string? ReadError()
     {
