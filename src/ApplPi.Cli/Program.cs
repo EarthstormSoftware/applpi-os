@@ -129,6 +129,11 @@ static class Program
             return 1;
         }
 
+        if (BlockMap.ForImage(image) is { } map)
+        {
+            Console.WriteLine($"Writing {map.MappedBytes / (1 << 20)} MiB of the {map.ImageSize / (1 << 20)} MiB image " +
+                "(the rest is empty space), then reading it back to check it.");
+        }
         var lastShown = "";
         ImageWriter.Write(disk, image, new ConsoleProgress<WriteProgress>(progress =>
         {

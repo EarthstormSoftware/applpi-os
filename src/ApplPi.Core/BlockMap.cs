@@ -12,7 +12,17 @@ public sealed class BlockMap
 {
     readonly List<(long Start, long End)> ranges;
 
-    BlockMap(List<(long Start, long End)> ranges) => this.ranges = ranges;
+    BlockMap(List<(long Start, long End)> ranges, long imageSize)
+    {
+        this.ranges = ranges;
+        ImageSize = imageSize;
+    }
+
+    /// <summary>The whole image's size in bytes.</summary>
+    public long ImageSize { get; }
+
+    /// <summary>How much of it holds data, and is written.</summary>
+    public long MappedBytes => ranges.Sum(range => range.End - range.Start);
 
     /// <summary>The .bmap beside an image (applpi-os-v0.1.0.img.xz: applpi-os-v0.1.0.bmap), or null if there isn't one.</summary>
     public static BlockMap? ForImage(string imagePath)
@@ -34,7 +44,8 @@ public sealed class BlockMap
                 End: (long.Parse(bounds[^1], CultureInfo.InvariantCulture) + 1) * blockSize))
             .OrderBy(range => range.Start)
             .ToList();
-        return new BlockMap(ranges);
+        var imageSize = bmap.Element("ImageSize") is { } size ? long.Parse(size.Value.Trim(), CultureInfo.InvariantCulture) : 0;
+        return new BlockMap(ranges, imageSize);
     }
 
     /// <summary>

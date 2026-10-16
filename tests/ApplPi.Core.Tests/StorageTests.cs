@@ -148,6 +148,8 @@ public sealed class StorageTests : IDisposable
             </bmap>
             """);
         const int chunk = 4 << 20;
+        Assert.Equal(1610612736, map.ImageSize);
+        Assert.Equal(5 * 4096, map.MappedBytes);
         Assert.Equal([(0, 8192), (1023 * 4096, 4096)], map.Mapped(0, chunk));
         Assert.Equal([(4096, 8192)], map.Mapped(chunk, chunk));
         Assert.Empty(map.Mapped(2L * chunk, chunk));
