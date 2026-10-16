@@ -1,19 +1,23 @@
-<#
+﻿<#
 .SYNOPSIS
 Builds the ApplPi OS image with Docker.
 
 .DESCRIPTION
 Runs pi-gen in a privileged Linux container (Docker Desktop on Windows, or any Docker host) and copies the image,
-its package list and the build log to deploy\ in the repository. A build takes roughly an hour: everything for the
-Pi runs under ARM emulation.
+its package list and the build log to deploy\ in the repository. A full build takes about 20 minutes (everything for
+the Pi runs under ARM emulation); -Quick about 6.
 #>
 [CmdletBinding()]
-param()
+param(
+    # Reuse the base system (pi-gen's stages 0 and 1) from the last build: about 6 minutes instead of 20. Use full
+    # builds for releases.
+    [switch]$Quick
+)
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot
 $deploy = Join-Path $repo 'deploy'
-$container = 'applpi-build'
+$container = 'applpi-os-build'
 
 function Invoke-Docker {
     # Docker writes progress to stderr, which Windows PowerShell turns into errors when output is redirected:
@@ -28,16 +32,24 @@ docker info --format '{{.ServerVersion}}' 2>&1 | Out-Null
 $ErrorActionPreference = 'Stop'
 if ($LASTEXITCODE -ne 0) { throw 'Docker is not running: start Docker Desktop and try again.' }
 
-$version = git -C $repo describe --tags --always --dirty
+# The version is the latest release tag (vX.Y.Z), with the commits since and -dirty for uncommitted changes when it
+# isn't a release build: v0.1.0-3-g1ad84dc-dirty
+$version = git -C $repo describe --tags --match 'v[0-9]*' --always --dirty
+$commit = git -C $repo rev-parse --short HEAD
 if ($LASTEXITCODE -ne 0) { throw 'Could not read the version from git.' }
+$buildDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
+Write-Host "Building ApplPi OS $version ($buildDate)"
 
-Invoke-Docker build --platform linux/386 --tag applpi-build $PSScriptRoot
+Invoke-Docker build --platform linux/386 --tag applpi-os-builder $PSScriptRoot
 
 if (docker ps --all --quiet --filter "name=^$container$") {
     Invoke-Docker rm --force --volumes $container | Out-Null
 }
 try {
-    Invoke-Docker run --name $container --privileged --env "APPLPI_VERSION=$version" applpi-build ./build-in-container.sh
+    # pi-gen's work folder is kept in a volume between builds, for -Quick
+    Invoke-Docker run --name $container --privileged --volume applpi-os-work:/pi-gen/work `
+        --env "APPLPI_VERSION=$version" --env "APPLPI_COMMIT=$commit" --env "APPLPI_BUILD_DATE=$buildDate" `
+        --env "APPLPI_QUICK=$([int]$Quick.IsPresent)" applpi-os-builder ./build-in-container.sh
 }
 finally {
     New-Item -ItemType Directory -Force $deploy | Out-Null

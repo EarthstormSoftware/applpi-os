@@ -32,5 +32,16 @@ if [ \$((ROOT_SIZE * 11 / 10)) -gt \$ROOT_PART_SIZE ]; then\n\
 \texit 1\n\
 fi|" "$prerun"
 
+# Quick builds reuse stages 0 and 1 (the base system, most of the build's time) from the last build, kept in the
+# applpi-os-work volume: only our stage and the export run again. A full build starts from nothing.
+work="work/${IMG_NAME}"
+if [ "${APPLPI_QUICK:-0}" = 1 ] && [ -d "$work/stage1/rootfs" ]; then
+	echo "Quick build: reusing stages 0 and 1 from the last build"
+	touch stage0/SKIP stage1/SKIP
+else
+	rm -rf work/*
+fi
+rm -rf "$work/stage2-applpi" "$work/export-image" "$work/build.log"
+
 ./build.sh
-cp work/*/build.log deploy/
+cp "$work/build.log" deploy/

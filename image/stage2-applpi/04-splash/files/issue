@@ -1,0 +1,8 @@
+
+  \e{green}ApplPi OS\e{reset} @VERSION@, built @BUILD_DATE@
+
+  Name      \n.local
+  IPv4      \4
+  IPv6      \6
+  Log in    ssh applpi@\n.local
+

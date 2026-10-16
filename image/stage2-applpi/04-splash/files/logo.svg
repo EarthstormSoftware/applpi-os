@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="160" viewBox="0 0 560 160">
+  <!-- ApplPi OS: a π in a rounded square (a board), and the name. Light on the splash's dark background. -->
+  <rect x="8" y="8" width="144" height="144" rx="28" fill="none" stroke="#3ccf91" stroke-width="10"/>
+  <!-- pins along the board's edge -->
+  <g fill="#3ccf91">
+    <rect x="44" y="0" width="10" height="14" rx="3"/><rect x="75" y="0" width="10" height="14" rx="3"/>
+    <rect x="106" y="0" width="10" height="14" rx="3"/>
+    <rect x="44" y="146" width="10" height="14" rx="3"/><rect x="75" y="146" width="10" height="14" rx="3"/>
+    <rect x="106" y="146" width="10" height="14" rx="3"/>
+  </g>
+  <!-- π -->
+  <g fill="#f2f4f3">
+    <rect x="38" y="48" width="84" height="13" rx="6"/>
+    <path d="M58 58 h13 v34 q0 14 -8 22 l-10 -8 q5 -6 5 -16 z"/>
+    <path d="M91 58 h13 v40 q0 8 7 8 h5 v12 h-8 q-17 0 -17 -18 z"/>
+  </g>
+  <text x="186" y="104" font-family="DejaVu Sans, Verdana, sans-serif" font-size="62" font-weight="bold" fill="#f2f4f3">ApplPi</text>
+  <text x="428" y="104" font-family="DejaVu Sans, Verdana, sans-serif" font-size="62" fill="#3ccf91">OS</text>
+</svg>

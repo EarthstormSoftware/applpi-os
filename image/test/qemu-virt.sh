@@ -77,7 +77,7 @@ boot() {
 	run_boot 2 && checks 2 && ssh_pi 'ls /etc/test-overlay; sudo -n systemctl poweroff' >> "$out/checks-2.log" 2>&1 || true
 	stop_qemu
 	echo "== Boot partition after" | tee -a "$out/summary.log"
-	mdir -i "$boot_img" :: | grep -i applpi | tee -a "$out/summary.log" || echo "no applpi files" | tee -a "$out/summary.log"
+	mdir -i "$boot_img" :: | grep -iE "applpi(\.json|-error)" | tee -a "$out/summary.log" || echo "no settings or error file" | tee -a "$out/summary.log"
 }
 
 run_boot() {
@@ -114,7 +114,7 @@ checks() {
 		cat /etc/applpi-release; hostname; uptime
 		findmnt -n / ; findmnt -n /data ; findmnt -n /boot/firmware
 		lsblk -o NAME,SIZE,FSTYPE,LABEL
-		ls /boot/firmware | grep -i applpi || echo "no applpi files on boot"
+		ls /boot/firmware | grep -iE "applpi(\.json|-error)" || echo "no settings or error file on boot"
 		sudo -n ls -l /data /data/settings /data/ssh
 		ls -l /run/applpi /run/applpi/authorized_keys
 		readlink /etc/localtime; date

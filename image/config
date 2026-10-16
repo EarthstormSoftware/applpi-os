@@ -1,5 +1,8 @@
 # pi-gen settings for ApplPi OS. Nothing per Pi goes here: the flash tool adds that in applpi.json.
 IMG_NAME=applpi-os
+# Image files are named by version (from build.ps1): applpi-os-v0.1.0.img.xz
+IMG_FILENAME="applpi-os-${APPLPI_VERSION:-dev}"
+ARCHIVE_FILENAME="applpi-os-${APPLPI_VERSION:-dev}"
 RELEASE=trixie
 STAGE_LIST="/pi-gen/stage0 /pi-gen/stage1 /pi-gen/stage2-applpi"
 DEPLOY_COMPRESSION=xz

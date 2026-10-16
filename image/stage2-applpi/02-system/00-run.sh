@@ -1,8 +1,14 @@
 #!/bin/bash -e
 # The ApplPi system: read-only root, the data partition, per-Pi settings, the network, SSH and logs
 
-install -m 644 /dev/null "${ROOTFS_DIR}/etc/applpi-release"
-echo "${APPLPI_VERSION:-dev}" > "${ROOTFS_DIR}/etc/applpi-release"
+# What this image is: on the Pi, and on the boot partition where Windows can read it
+cat > "${ROOTFS_DIR}/etc/applpi-release" <<- EOF
+	VERSION=${APPLPI_VERSION:-dev}
+	COMMIT=${APPLPI_COMMIT:-unknown}
+	BUILD_DATE=${APPLPI_BUILD_DATE:-$(date -u +%Y-%m-%d)}
+EOF
+chmod 644 "${ROOTFS_DIR}/etc/applpi-release"
+install -m 644 "${ROOTFS_DIR}/etc/applpi-release" "${ROOTFS_DIR}/boot/firmware/applpi-release.txt"
 
 # Read-only root, with changes kept in RAM (overlayroot, as raspi-config's overlay file system), and no resize: the
 # card is laid out on first boot by applpi-data.service

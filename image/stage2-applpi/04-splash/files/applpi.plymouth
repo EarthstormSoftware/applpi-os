@@ -1,0 +1,17 @@
+[Plymouth Theme]
+Name=ApplPi
+Description=The ApplPi OS logo with a spinner
+ModuleName=two-step
+
+[two-step]
+ImageDir=/usr/share/plymouth/themes/applpi
+WatermarkHorizontalAlignment=.5
+WatermarkVerticalAlignment=.45
+HorizontalAlignment=.5
+VerticalAlignment=.65
+DialogHorizontalAlignment=.5
+DialogVerticalAlignment=.382
+Transition=none
+TransitionDuration=0.0
+BackgroundStartColor=0x101418
+BackgroundEndColor=0x101418
