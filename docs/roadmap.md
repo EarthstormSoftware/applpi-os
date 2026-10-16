@@ -24,10 +24,14 @@ the official image builder, so the Pi's own kernel, firmware and drivers (HATs, 
 Raspberry Pi OS.
 
 Stripped and locked down:
-- No desktop, Bluetooth, printing, swap or package timers (no automatic updates).
-- Root filesystem read-only, with changes kept in RAM, so pulling the power is harmless and the card isn't worn.
-  Logs are kept in RAM too.
-- SSH by key only, no passwords. Listening: SSH, mDNS (for `<name>.local`) and the apps' own ports. Nothing else.
+- No desktop, Bluetooth, printing, swap or package timers (no automatic updates). Kernels for the Pi 2/3 (v7) and
+  the Pi 3/4 and later (v8) only, and no kernel headers.
+- Root filesystem read-only, with changes kept in RAM (`overlayroot=tmpfs`, as raspi-config's overlay file system),
+  so pulling the power is harmless and the card isn't worn. Logs are kept in RAM too.
+- SSH by key only, no passwords, for one admin user, `applpi` (passwordless sudo; root can't log in). Listening: SSH,
+  mDNS (for `<name>.local`) and the apps' own ports. Nothing else.
+- Network: systemd-networkd (DHCP on Ethernet and Wi-Fi), wpa_supplicant, systemd-resolved (local stub only, no
+  LLMNR), Avahi for mDNS.
 - Compiled libraries the apps need are part of the OS (for example `rpi_ws281x` for the Unicorn HAT and SDL2/pygame
   drawing straight to the display), so an app is plain Python and a deploy never compiles anything on the Pi.
 
@@ -45,16 +49,22 @@ in the way that matters here).
 | root B | the other OS slot, read-only | OS updates |
 | data (ext4) | `/data/apps/<name>`, app settings, Wi-Fi details, SSH host keys | app deploys |
 
-The firmware's `os_prefix` setting in `config.txt` picks the slot. Root B and the data partition are created on
-first boot to fill the card, so the image stays small and works on any card size. The SSH host keys live on the
-data partition, so a Pi keeps the same identity across OS updates.
+The firmware's `os_prefix` setting in `config.txt` picks the slot. Both root slots have a fixed size (1.25 GiB,
+`ROOT_SLOT_MIB` in `image\config`; the root uses about 600 MB), so an update always fits. With the 256 MiB boot
+partition, a 4 GB card keeps about 1 GiB for data. If the root outgrows its slot, apt's package lists, other
+locales and the docs (about 190 MB) can go: nothing is installed on the Pi itself. Root B and the data partition are created on first
+boot (`applpi-data.service`), the data partition filling the rest of the card. The SSH host key lives on the data
+partition, so a Pi keeps the same identity across OS updates.
 
 ### Device settings and first boot
 
-Windows can't write ext4, so the flash tool writes the device's settings to `applpi.json` on the boot partition:
-hostname, Wi-Fi network and password, SSH public key(s), time zone. On first boot the Pi creates root B and the
-data partition, moves the settings to the data partition and deletes `applpi.json` (so the Wi-Fi password doesn't
-stay on the FAT partition).
+Windows can't write ext4, so the flash tool writes the device's settings to `applpi.json` on the boot partition
+(format: `image\applpi.example.json`): hostname, time zone, Wi-Fi country, network and password, SSH public key(s).
+At boot, `applpi-settings.service` checks the file, moves the settings to the data partition (keeping the Wi-Fi key
+made from the password, not the password) and deletes `applpi.json`, so the password doesn't stay on the FAT
+partition. If the file is wrong, it is deleted anyway and the reason is left in `applpi-error.txt` on the boot
+partition. Then, at every boot, it sets the hostname, time zone, Wi-Fi and SSH keys from the data partition: the root
+is read-only, so they are written to RAM.
 
 Per-device details are kept outside the repo, in `%APPDATA%\ApplPi` (only `*.example.json` files are committed).
 
@@ -78,11 +88,14 @@ then the card goes in the PC and the one line in `config.txt` is changed back.
 
 ### Builds
 
-- Images are built by GitHub Actions (free for a public repo), from a tag for releases or by hand from any branch
-  for test builds. Each release keeps its image (compressed) and checksum. A rebuild fetches whatever packages are
-  current, so the kept images, not the build, are what's frozen.
-- The build is one script that runs anywhere Docker does, so a local build (Docker Desktop on WSL2) works too.
-  The Synology DS420+ was ruled out as a builder: 2 cores emulating ARM, and an old (4.4) kernel that may lack the
+- `image\build.ps1` builds the image in Docker (Docker Desktop on Windows): pi-gen at a fixed release tag, its stages
+  0 and 1 (a bare bootable system) and our `stage2-applpi` in place of the Lite stage, which brings in compilers,
+  Bluetooth, cloud-init and swap. The image goes in `deploy\`.
+- Builds are local until the image works on the test Pi. Then GitHub Actions (free for a public repo) runs the same
+  container, from a tag for releases or by hand from any branch for test builds. Each release keeps its image
+  (compressed) and checksum. A rebuild fetches whatever packages are current, so the kept images, not the build,
+  are what's frozen.
+- The Synology DS420+ was ruled out as a builder: 2 cores emulating ARM, and an old (4.4) kernel that may lack the
   `binfmt_misc` support the build needs. It is a good place to keep a copy of the images.
 - While developing, changes are tried on the test Pi first (temporarily writable), then put into the build, so a
   new image is built for a batch of working changes rather than for each one.
@@ -100,13 +113,20 @@ Start with one test Pi (a plain Pi 2 with the official Wi-Fi dongle). The Pis wi
 
 ### 1. First image
 
-pi-gen configuration and a GitHub Actions workflow that build the stripped, read-only image, with first boot
-reading `applpi.json`. One slot for now.
+pi-gen configuration that builds the stripped, read-only image locally in Docker, with first boot laying out the
+card and reading `applpi.json`. Booting from slot A only for now (the firmware's slot directories come in step 4).
+Until the flash tool exists, the image is written with Raspberry Pi Imager (no customisation) and `applpi.json` is
+copied onto the boot partition by hand. The GitHub Actions workflow comes once the build is settled.
 
 ### 2. Flash tool
 
 `applpi` on the command line: card readers, writing the image, `applpi.json` from the device settings in
 `%APPDATA%\ApplPi`. Done when the test Pi joins Wi-Fi on first boot and SSH works with the key.
+
+- Done: `applpi setup [name]` asks for the Pi's name, Wi-Fi and time zone (defaults from the last Pi), makes an SSH
+  key if there isn't one, and writes `applpi.json` to an ApplPi card's boot partition, checked against the same rules
+  as the Pi. Settings are kept in `%APPDATA%\ApplPi\devices.json`, Wi-Fi passwords encrypted with DPAPI.
+- Next: `applpi flash`, writing the image first.
 
 ### 3. Apps
 

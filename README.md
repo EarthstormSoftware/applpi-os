@@ -12,7 +12,27 @@ as a Pico W, with Python, the network, USB and GPIO.
 - **No serial cable or screen needed:** the card is flashed from Windows with the Pi's name, Wi-Fi and SSH key, so it
   comes up on the network ready for SSH.
 
-> **Status:** planning. See the [roadmap](docs/roadmap.md) for the design and the steps.
+> **Status:** building the first image. See the [roadmap](docs/roadmap.md) for the design and the steps.
+
+## Setting up a Pi
+
+Write the image to a card (for now with Raspberry Pi Imager, "Use custom", no customisation), leave the card in the
+PC and run:
+
+```powershell
+dotnet run --project src\ApplPi.Cli -- setup
+```
+
+It asks for the Pi's name, Wi-Fi and time zone, makes an SSH key if you don't have one, and puts the settings on the
+card. Then boot the Pi with it and, after a few minutes, `ssh applpi@<name>.local`.
+
+## Building the image
+
+With Docker Desktop running: `.\image\build.ps1`. The image ends up in `deploy\`.
+
+To test it without a Pi: `.\image\test\test-qemu.ps1` boots it twice in QEMU (generic ARM machine and kernel, so not
+the Pi's kernel, firmware or Wi-Fi) and checks first boot, the settings, SSH and the read-only root. It takes about
+45 minutes; the results go in `deploy\test\`.
 
 ## Licence
 
