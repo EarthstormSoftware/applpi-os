@@ -8,3 +8,6 @@
 *.json    text
 *.cs      text diff=csharp
 *.ps1     text
+
+# Everything that goes into the image build runs on Linux
+image/**  text eol=lf

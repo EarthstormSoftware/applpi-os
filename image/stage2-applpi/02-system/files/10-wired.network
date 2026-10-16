@@ -1,0 +1,14 @@
+[Match]
+Name=eth*
+
+[Network]
+DHCP=yes
+LLMNR=no
+MulticastDNS=no
+
+# The machine ID is new at each boot (read-only root), so DHCP identifies the Pi by MAC address to keep its address
+[DHCPv4]
+ClientIdentifier=mac
+
+[DHCPv6]
+DUIDType=link-layer

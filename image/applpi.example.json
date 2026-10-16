@@ -1,0 +1,12 @@
+{
+  "hostname": "applpi-test",
+  "timezone": "Europe/London",
+  "wifi": {
+    "country": "GB",
+    "ssid": "Example network",
+    "password": "example-password"
+  },
+  "ssh_keys": [
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleExampleExampleExampleExampleExample example"
+  ]
+}

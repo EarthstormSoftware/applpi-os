@@ -1,0 +1,16 @@
+# pi-gen settings for ApplPi OS. Nothing per Pi goes here: the flash tool adds that in applpi.json.
+IMG_NAME=applpi-os
+RELEASE=trixie
+STAGE_LIST="/pi-gen/stage0 /pi-gen/stage1 /pi-gen/stage2-applpi"
+DEPLOY_COMPRESSION=xz
+COMPRESSION_LEVEL=6
+
+LOCALE_DEFAULT=en_GB.UTF-8
+TARGET_HOSTNAME=applpi
+FIRST_USER_NAME=applpi
+
+# Size of each root slot (A and B). Fixed, so root B (made on first boot) matches root A and an update always fits.
+# With a 256 MiB boot partition, a 4 GB card (about 3.7 GiB) keeps about 1 GiB for data.
+ROOT_SLOT_MIB=1280
+# The boot partition holds the firmware and, from step 4, a kernel and initramfs per slot (about 110 MB in all)
+BOOT_MIB=256

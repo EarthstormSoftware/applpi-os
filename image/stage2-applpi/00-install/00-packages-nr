@@ -1,0 +1,10 @@
+openssh-server
+avahi-daemon
+libnss-myhostname
+wpasupplicant
+firmware-brcm80211
+overlayroot
+python3
+sudo
+fdisk
+e2fsprogs
