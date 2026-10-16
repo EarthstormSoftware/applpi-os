@@ -12,8 +12,8 @@ RUN apt-get -y update && \
         git parted quilt coreutils qemu-user debootstrap zerofree zip dosfstools e2fsprogs \
         libarchive-tools libcap2-bin rsync grep udev xz-utils curl xxd file kmod bc \
         ca-certificates fdisk gpg pigz arch-test \
-    # and to render the boot splash's logo
-        librsvg2-bin fonts-dejavu-core \
+    # to render the logos, and for pi-gen to list the image's used blocks (.bmap, so applpi flash skips the rest)
+        librsvg2-bin fonts-dejavu-core imagemagick bmap-tools \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone --depth 1 --branch "${PIGEN_REF}" https://github.com/RPi-Distro/pi-gen /pi-gen \

@@ -37,8 +37,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Docker is not running: start Docker Desktop an
 $version = git -C $repo describe --tags --match 'v[0-9]*' --always --dirty
 $commit = git -C $repo rev-parse --short HEAD
 if ($LASTEXITCODE -ne 0) { throw 'Could not read the version from git.' }
-$buildDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
-Write-Host "Building ApplPi OS $version ($buildDate)"
+# When it was built, in UTC: 20261016-2249
+$buildStamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmm')
+Write-Host "Building ApplPi OS $version (build $buildStamp UTC)"
 
 Invoke-Docker build --platform linux/386 --tag applpi-os-builder $PSScriptRoot
 
@@ -48,7 +49,7 @@ if (docker ps --all --quiet --filter "name=^$container$") {
 try {
     # pi-gen's work folder is kept in a volume between builds, for -Quick
     Invoke-Docker run --name $container --privileged --volume applpi-os-work:/pi-gen/work `
-        --env "APPLPI_VERSION=$version" --env "APPLPI_COMMIT=$commit" --env "APPLPI_BUILD_DATE=$buildDate" `
+        --env "APPLPI_VERSION=$version" --env "APPLPI_COMMIT=$commit" --env "APPLPI_BUILD_STAMP=$buildStamp" `
         --env "APPLPI_QUICK=$([int]$Quick.IsPresent)" applpi-os-builder ./build-in-container.sh
 }
 finally {

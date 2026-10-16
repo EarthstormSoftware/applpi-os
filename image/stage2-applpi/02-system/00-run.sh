@@ -5,7 +5,7 @@
 cat > "${ROOTFS_DIR}/etc/applpi-release" <<- EOF
 	VERSION=${APPLPI_VERSION:-dev}
 	COMMIT=${APPLPI_COMMIT:-unknown}
-	BUILD_DATE=${APPLPI_BUILD_DATE:-$(date -u +%Y-%m-%d)}
+	BUILD_STAMP=${APPLPI_BUILD_STAMP:-$(date -u +%Y%m%d-%H%M)}
 EOF
 chmod 644 "${ROOTFS_DIR}/etc/applpi-release"
 install -m 644 "${ROOTFS_DIR}/etc/applpi-release" "${ROOTFS_DIR}/boot/firmware/applpi-release.txt"

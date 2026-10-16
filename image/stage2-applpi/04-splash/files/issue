@@ -1,5 +1,13 @@
 
-  \e{green}ApplPi OS\e{reset} @VERSION@, built @BUILD_DATE@
+
+
+
+
+
+
+
+
+  \e{green}ApplPi OS\e{reset} @VERSION@, build @BUILD_STAMP@ UTC
 
   Name      \n.local
   IPv4      \4

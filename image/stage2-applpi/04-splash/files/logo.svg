@@ -1,19 +1,49 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="560" height="160" viewBox="0 0 560 160">
-  <!-- ApplPi OS: a π in a rounded square (a board), and the name. Light on the splash's dark background. -->
-  <rect x="8" y="8" width="144" height="144" rx="28" fill="none" stroke="#3ccf91" stroke-width="10"/>
-  <!-- pins along the board's edge -->
-  <g fill="#3ccf91">
-    <rect x="44" y="0" width="10" height="14" rx="3"/><rect x="75" y="0" width="10" height="14" rx="3"/>
-    <rect x="106" y="0" width="10" height="14" rx="3"/>
-    <rect x="44" y="146" width="10" height="14" rx="3"/><rect x="75" y="146" width="10" height="14" rx="3"/>
-    <rect x="106" y="146" width="10" height="14" rx="3"/>
-  </g>
-  <!-- π -->
-  <g fill="#f2f4f3">
-    <rect x="38" y="48" width="84" height="13" rx="6"/>
-    <path d="M58 58 h13 v34 q0 14 -8 22 l-10 -8 q5 -6 5 -16 z"/>
-    <path d="M91 58 h13 v40 q0 8 7 8 h5 v12 h-8 q-17 0 -17 -18 z"/>
-  </g>
-  <text x="186" y="104" font-family="DejaVu Sans, Verdana, sans-serif" font-size="62" font-weight="bold" fill="#f2f4f3">ApplPi</text>
-  <text x="428" y="104" font-family="DejaVu Sans, Verdana, sans-serif" font-size="62" fill="#3ccf91">OS</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="170" viewBox="0 0 560 170">
+  <!-- ApplPi OS: a green apple (no bite) with a π carved into it, and the name. For the splash's dark background. -->
+  <defs>
+    <radialGradient id="apple" cx="0.38" cy="0.35" r="0.75">
+      <stop offset="0" stop-color="#6fe2ab"/>
+      <stop offset="0.45" stop-color="#3ccf91"/>
+      <stop offset="1" stop-color="#1f8f5f"/>
+    </radialGradient>
+    <linearGradient id="leaf" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5fdca4"/>
+      <stop offset="1" stop-color="#25935f"/>
+    </linearGradient>
+    <!-- The π as rounded strokes: the bar and two legs -->
+    <g id="pi" fill="none" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M-31 -21 H31"/>
+      <path d="M-13 -19 C -13 0, -15 11, -21 18"/>
+      <path d="M13 -19 V 8 C 13 17, 19 20, 26 15"/>
+    </g>
+    <!-- The cut: apple flesh with a soft shadow inside its upper-left wall, and a fine grain -->
+    <filter id="carve" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2.2" result="blur"/>
+      <feOffset in="blur" dx="3" dy="3" result="moved"/>
+      <feComposite in="SourceAlpha" in2="moved" operator="arithmetic" k2="1" k3="-1" result="rim"/>
+      <feFlood flood-color="#0e4a30" flood-opacity="0.9"/>
+      <feComposite in2="rim" operator="in" result="shadow"/>
+      <feComposite in="shadow" in2="SourceGraphic" operator="over" result="cut"/>
+      <feTurbulence type="fractalNoise" baseFrequency="1.1" numOctaves="2" seed="7" result="noise"/>
+      <feColorMatrix in="noise" type="matrix" values="0 0 0 0 0.25  0 0 0 0 0.2  0 0 0 0 0.1  0 0 0 0.35 0" result="grain"/>
+      <feComposite in="grain" in2="SourceAlpha" operator="in" result="grainInCut"/>
+      <feMerge><feMergeNode in="cut"/><feMergeNode in="grainInCut"/></feMerge>
+    </filter>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="1.2"/>
+    </filter>
+  </defs>
+
+  <!-- Apple: body, stem, leaf -->
+  <path d="M80 44 C 60 28, 18 30, 12 74 C 6 118, 40 160, 62 160 C 72 160, 76 154, 80 154
+           C 84 154, 88 160, 98 160 C 120 160, 154 118, 148 74 C 142 30, 100 28, 80 44 Z" fill="url(#apple)"/>
+  <path d="M80 46 C 79 32, 82 20, 90 10" fill="none" stroke="#6b4a2b" stroke-width="6" stroke-linecap="round"/>
+  <path d="M88 22 C 102 4, 126 6, 134 12 C 124 30, 102 32, 88 22 Z" fill="url(#leaf)"/>
+
+  <!-- Carved π: a soft lit rim on the lower right, then the cut -->
+  <use href="#pi" transform="translate(81.5 103.5)" stroke="#a8f0cc" opacity="0.55" filter="url(#soft)"/>
+  <use href="#pi" transform="translate(80 102)" stroke="#efe6c2" filter="url(#carve)"/>
+
+  <text x="186" y="112" font-family="DejaVu Sans, Verdana, sans-serif" font-size="62" font-weight="bold" fill="#f2f4f3">ApplPi</text>
+  <text x="428" y="112" font-family="DejaVu Sans, Verdana, sans-serif" font-size="62" fill="#3ccf91">OS</text>
 </svg>

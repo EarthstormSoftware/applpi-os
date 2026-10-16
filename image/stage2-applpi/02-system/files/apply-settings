@@ -3,7 +3,9 @@
 
 The flash tool writes them to applpi.json on the boot partition. When that file is there, it is checked, moved to the
 data partition and deleted, so the Wi-Fi password doesn't stay on the FAT partition (only the key made from it is
-kept). Then, at every boot, the hostname, time zone, Wi-Fi and SSH keys are set from the copy on the data partition.
+kept). The SSH host key can come with them (applpi keeps one per Pi, so a reflashed Pi keeps its identity); otherwise
+one is made. Then, at every boot, the hostname, time zone, Wi-Fi and SSH keys are set from the copy on the data
+partition.
 The root filesystem is read-only with changes in RAM, so all of this is made again at each boot.
 """
 
@@ -29,6 +31,9 @@ COUNTRY = re.compile(r"[A-Z]{2}")
 SSH_KEY = re.compile(
     r"(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com"
     r"|sk-ecdsa-sha2-nistp256@openssh\.com) [A-Za-z0-9+/]+=*( [^\r\n]*)?"
+)
+HOST_KEY_PATTERN = re.compile(
+    r"-----BEGIN OPENSSH PRIVATE KEY-----\n[A-Za-z0-9+/=\n]+-----END OPENSSH PRIVATE KEY-----\n?"
 )
 
 
@@ -75,6 +80,14 @@ def check(raw: object) -> dict:
         raise SettingsError("ssh_keys must be a list of one or more SSH public keys")
     settings["ssh_keys"] = [key.strip() for key in keys]
 
+    # Taken out by import_boot_settings: it goes in /data/ssh, not in device.json
+    host_key = raw.get("host_key")
+    if host_key is not None:
+        host_key = host_key.replace("\r\n", "\n").strip() + "\n" if isinstance(host_key, str) else None
+        if host_key is None or not HOST_KEY_PATTERN.fullmatch(host_key):
+            raise SettingsError("host_key must be an OpenSSH private key")
+        settings["host_key"] = host_key
+
     return settings
 
 
@@ -104,6 +117,12 @@ def import_boot_settings() -> None:
         os.sync()
         print(f"applpi.json was not used: {error}", file=sys.stderr)
         return
+    host_key = settings.pop("host_key", None)
+    if host_key:
+        write(HOST_KEY, host_key, 0o600)
+        public_key = subprocess.run(["ssh-keygen", "-y", "-f", str(HOST_KEY)], check=True, capture_output=True,
+                                    text=True).stdout
+        write(HOST_KEY.with_name(HOST_KEY.name + ".pub"), public_key, 0o644)
     write(SETTINGS, json.dumps(settings, indent=2) + "\n", 0o600)
     BOOT_SETTINGS.unlink()
     BOOT_ERROR.unlink(missing_ok=True)
@@ -138,11 +157,13 @@ def apply(settings: dict) -> None:
 
 
 def main() -> int:
-    # The host key stays with the Pi, on the data partition, so it keeps the same identity across OS updates
+    import_boot_settings()
+
+    # The host key stays with the Pi, on the data partition, so it keeps the same identity across OS updates. If
+    # applpi didn't send one, the Pi makes its own.
     if not HOST_KEY.exists():
         subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "", "-f", str(HOST_KEY)], check=True)
 
-    import_boot_settings()
     if not SETTINGS.exists():
         print("No settings: put applpi.json on the boot partition", file=sys.stderr)
         return 1
