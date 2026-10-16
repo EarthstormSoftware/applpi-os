@@ -1,9 +1,10 @@
 #!/bin/bash
 # Test boots of an ApplPi OS image on QEMU's generic ARM machine ("virt"), run by test-qemu.ps1 in three containers
 # sharing /work:
-#   unpack <image.img.xz>  (amd64, privileged)  the image as a 4 GB card, and overlayroot's initramfs files
-#   kernel                 (arm/v7)             Debian's generic ARM kernel and an initramfs with overlayroot
-#   boot                   (amd64, privileged)  boots the card twice and checks it over SSH; results in /work/out
+#   unpack <image.img.xz>  (applpi-os-tester, privileged)  the image as a 4 GB card, and overlayroot's initramfs files
+#   kernel                 (applpi-os-test-kernel, ARM)     Debian's generic ARM kernel and an initramfs with overlayroot
+#   boot [quick]           (applpi-os-tester, privileged)  boots the card twice (once if quick) and checks it over SSH;
+#                                                          results in /work/out
 # QEMU's Pi 2 model can't read the SD card with the Pi kernel, so this tests everything of ours (first boot, settings,
 # SSH, read-only root) but not the Pi's kernel, firmware or Wi-Fi.
 set -euo pipefail
@@ -17,7 +18,6 @@ offset() {
 }
 
 unpack() {
-	apt-get -qq update && apt-get -qq install -y --no-install-recommends xz-utils fdisk >/dev/null
 	xz -dc "$1" > "$img"
 	# The size of a "4 GB" card, the smallest that fits root B and the data partition
 	truncate -s 3780M "$img"
@@ -32,13 +32,7 @@ unpack() {
 }
 
 kernel() {
-	# (overlayroot's initramfs hook copies cryptsetup and mke2fs in, and its script needs busybox, as on the Pi)
-	apt-get -qq update && apt-get -qq install -y --no-install-recommends linux-image-armmp initramfs-tools cryptsetup-bin \
-		e2fsprogs busybox >/dev/null
 	cp -a "$work/overlayroot/." /
-	# The virtual card and network, loaded in the initramfs; no swap to resume from
-	printf '%s\n' virtio_mmio virtio_blk virtio_net >> /etc/initramfs-tools/modules
-	echo RESUME=none > /etc/initramfs-tools/conf.d/resume
 	version=$(basename /usr/lib/modules/*)
 	mkinitramfs -o "$work/initrd.img" "$version"
 	cp "/boot/vmlinuz-$version" "$work/vmlinuz"
@@ -47,8 +41,7 @@ kernel() {
 }
 
 boot() {
-	apt-get -qq update
-	apt-get -qq install -y --no-install-recommends qemu-system-arm mtools openssh-client fdisk >/dev/null
+	local quick=${1:-}
 	local out=$work/out
 	rm -rf "$out"; mkdir -p "$out"
 
@@ -58,24 +51,31 @@ boot() {
 	cp -a "$work/modules/." /mnt/root/usr/lib/modules/
 	umount /mnt/root
 
-	# A throwaway key and test settings (no Wi-Fi in QEMU)
+	# Throwaway keys and test settings (no Wi-Fi in QEMU). The Pi's host key is sent with them, as applpi does, and
+	# ssh trusts only that key: a Pi that made its own wouldn't be reachable.
 	local boot_img="$img@@$(offset 1)"
 	ssh-keygen -q -t ed25519 -N "" -f /tmp/key
+	ssh-keygen -q -t ed25519 -N "" -C "" -f /tmp/hostkey
+	echo "[localhost]:2222 $(cut -d' ' -f1,2 /tmp/hostkey.pub)" > /tmp/known_hosts
 	cat > /tmp/applpi.json <<-EOF
-		{ "hostname": "applpi-qemu", "timezone": "Europe/London", "ssh_keys": ["$(cat /tmp/key.pub)"] }
+		{ "hostname": "applpi-qemu", "timezone": "Europe/London", "ssh_keys": ["$(cat /tmp/key.pub)"],
+		  "host_key": "$(awk '{printf "%s\\n", $0}' /tmp/hostkey)" }
 	EOF
 	mcopy -o -i "$boot_img" /tmp/applpi.json ::applpi.json
 	mcopy -o -i "$boot_img" ::cmdline.txt /tmp/cmdline.txt
-	# Emulation is slow: finding the devices can take minutes, longer than systemd's usual 90 s wait
+	# Emulation is slow: finding the devices can take minutes, longer than systemd's usual 90 s wait. AppArmor is
+	# off for the test boots only: loading its profiles takes minutes when emulated, and tests nothing of ours.
 	cmdline="$(sed 's/console=[^ ]*//g' /tmp/cmdline.txt | tr -s ' ' | tr -d '\n') console=ttyAMA0 net.ifnames=0"
-	cmdline="$cmdline systemd.default_device_timeout_sec=900"
+	cmdline="$cmdline systemd.default_device_timeout_sec=900 apparmor=0"
 	echo "Kernel command line: $cmdline"
 
 	# The file written to /etc on the first boot must be gone on the second (the root's changes are in RAM)
 	run_boot 1 && checks 1 && ssh_pi 'sudo -n touch /etc/test-overlay; sudo -n systemctl poweroff' || true
 	stop_qemu
-	run_boot 2 && checks 2 && ssh_pi 'ls /etc/test-overlay; sudo -n systemctl poweroff' >> "$out/checks-2.log" 2>&1 || true
-	stop_qemu
+	if [ "$quick" != quick ]; then
+		run_boot 2 && checks 2 && ssh_pi 'ls /etc/test-overlay; sudo -n systemctl poweroff' >> "$out/checks-2.log" 2>&1 || true
+		stop_qemu
+	fi
 	echo "== Boot partition after" | tee -a "$out/summary.log"
 	mdir -i "$boot_img" :: | grep -iE "applpi(\.json|-error)" | tee -a "$out/summary.log" || echo "no settings or error file" | tee -a "$out/summary.log"
 }
@@ -90,7 +90,12 @@ run_boot() {
 	qemu=$!
 	# Up to 40 minutes for SSH (the first boot lays out the card, and everything is emulated)
 	for _ in $(seq 120); do
-		if ssh_pi true 2>/dev/null; then echo "SSH up" | tee -a "$work/out/summary.log"; return 0; fi
+		if ssh_pi true 2>/dev/null; then
+			echo "SSH up" | tee -a "$work/out/summary.log"
+			# SSH answers before the boot has finished: wait for that, so the checks see the booted system
+			ssh_pi 'systemctl is-system-running --wait' 2>&1 | sed 's/^/System: /' | tee -a "$work/out/summary.log"
+			return 0
+		fi
 		kill -0 $qemu 2>/dev/null || break
 		sleep 10
 	done
@@ -99,9 +104,9 @@ run_boot() {
 }
 
 ssh_pi() {
-	# The host key must stay the same across boots: a changed key fails the second boot
-	ssh -q -i /tmp/key -p 2222 -o UserKnownHostsFile=/tmp/known_hosts -o StrictHostKeyChecking=accept-new \
-		-o ConnectTimeout=20 applpi@localhost "$@"
+	# Only the host key sent in applpi.json is trusted, on both boots
+	ssh -i /tmp/key -p 2222 -o UserKnownHostsFile=/tmp/known_hosts -o StrictHostKeyChecking=yes \
+		-o LogLevel=ERROR -o ConnectTimeout=20 -o ServerAliveInterval=15 applpi@localhost "$@"
 }
 
 stop_qemu() {
@@ -110,6 +115,17 @@ stop_qemu() {
 }
 
 checks() {
+	# Retried: under emulation a connection can still fail now and then
+	local attempt
+	for attempt in 1 2 3; do
+		run_checks "$1" && [ -s "$work/out/checks-$1.log" ] && return 0
+		echo "Checks on boot $1 failed (attempt $attempt): $(tail -1 "$work/out/checks-$1.log")" | tee -a "$work/out/summary.log"
+		sleep 20
+	done
+	return 1
+}
+
+run_checks() {
 	ssh_pi 'set -x
 		cat /etc/applpi-release; hostname; uptime
 		findmnt -n / ; findmnt -n /data ; findmnt -n /boot/firmware
