@@ -16,6 +16,14 @@ sed -i 's/ resize//; s/^/overlayroot=tmpfs /' "${ROOTFS_DIR}/boot/firmware/cmdli
 install -d "${ROOTFS_DIR}/etc/systemd/system/systemd-remount-fs.service.d"
 install -m 644 files/remount-fs.conf "${ROOTFS_DIR}/etc/systemd/system/systemd-remount-fs.service.d/applpi.conf"
 
+# No partition IDs in fstab: pi-gen's would be this image's, and an OS update puts another image in the other slot.
+# The initramfs mounts the root named on the kernel command line, and the boot partition is mounted by a generator
+# that finds it on the same card. (A writable root while developing then needs rw on the kernel command line too.)
+cat > "${ROOTFS_DIR}/etc/fstab" <<- EOF
+	proc            /proc           proc    defaults          0       0
+EOF
+install -m 755 files/boot-generator "${ROOTFS_DIR}/usr/lib/systemd/system-generators/applpi-boot"
+
 # The data partition and per-Pi settings
 install -d "${ROOTFS_DIR}/data"
 install -d "${ROOTFS_DIR}/usr/lib/applpi"

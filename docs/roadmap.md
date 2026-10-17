@@ -80,9 +80,12 @@ answering), makes itself permanent by switching `config.txt`. Any reset before t
 hangs, a power cut, a kernel that doesn't start) boots `config.txt`, the old slot, again. Checked on the Pi 2 (firmware
 of Sep 2026): tryboot.txt was used for exactly one boot.
 
-Before this works, nothing may name the image's own partition IDs: `cmdline.txt` and `fstab` use the PARTUUIDs of the
-image they came from, which an update to another image changes. They have to come from the card itself, as the data
-partition's mount does.
+Nothing in the root names the image's own partition IDs, because an update puts another image (with other IDs) in
+the other slot. `fstab` only has `/proc`: the initramfs mounts the root named by `root=PARTUUID=` on the kernel
+command line, and a systemd generator (`applpi-boot`) mounts partition 1 of the same card (the disk ID from `root=`)
+at `/boot/firmware`, as `mount-data` finds the data partition. The one ID left is `root=` in the slot's
+`cmdline.txt`: the image's own on a newly flashed card (the card has the image's disk ID), and written by the update
+from the card's disk ID and the slot's partition (`-02` for A, `-03` for B).
 
 ### Apps
 

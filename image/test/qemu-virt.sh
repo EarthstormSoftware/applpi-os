@@ -129,6 +129,7 @@ run_checks() {
 	ssh_pi 'set -x
 		cat /etc/applpi-release; hostname; uptime
 		findmnt -n / ; findmnt -n /data ; findmnt -n /boot/firmware
+		grep -c PARTUUID /etc/fstab /media/root-ro/etc/fstab; systemctl is-active boot-firmware.mount
 		lsblk -o NAME,SIZE,FSTYPE,LABEL
 		ls /boot/firmware | grep -iE "applpi(\.json|-error)" || echo "no settings or error file on boot"
 		sudo -n ls -l /data /data/settings /data/ssh
