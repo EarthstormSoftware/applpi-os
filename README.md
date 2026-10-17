@@ -35,7 +35,7 @@ are kept in `%APPDATA%\ApplPi`, Wi-Fi passwords and host keys encrypted for your
 With a monitor connected, the Pi shows the ApplPi OS logo while it boots, then its name, addresses, image version and
 build time; an SSH login opens with the same information beside the apple. The screen blanks after 5 minutes without
 a key pressed. The boot messages are in the journal
-(`journalctl -b`); to see them on screen, remove `quiet loglevel=3 splash` from `cmdline.txt` on the card.
+(`journalctl -b`); to see them on screen, remove `quiet loglevel=3 splash` from `slotA\cmdline.txt` on the card.
 
 ## Building the image
 

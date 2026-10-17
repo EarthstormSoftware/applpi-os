@@ -62,7 +62,7 @@ boot() {
 		  "host_key": "$(awk '{printf "%s\\n", $0}' /tmp/hostkey)" }
 	EOF
 	mcopy -o -i "$boot_img" /tmp/applpi.json ::applpi.json
-	mcopy -o -i "$boot_img" ::cmdline.txt /tmp/cmdline.txt
+	mcopy -o -i "$boot_img" ::slotA/cmdline.txt /tmp/cmdline.txt
 	# Emulation is slow: finding the devices can take minutes, longer than systemd's usual 90 s wait. AppArmor is
 	# off for the test boots only: loading its profiles takes minutes when emulated, and tests nothing of ours.
 	cmdline="$(sed 's/console=[^ ]*//g' /tmp/cmdline.txt | tr -s ' ' | tr -d '\n') console=ttyAMA0 net.ifnames=0"
@@ -130,6 +130,7 @@ run_checks() {
 		cat /etc/applpi-release; hostname; uptime
 		findmnt -n / ; findmnt -n /data ; findmnt -n /boot/firmware
 		grep -c PARTUUID /etc/fstab /media/root-ro/etc/fstab; systemctl is-active boot-firmware.mount
+		ls /boot/firmware /boot/firmware/slotA | grep -vE "\.dtb$"; grep "^os_prefix" /boot/firmware/config.txt
 		lsblk -o NAME,SIZE,FSTYPE,LABEL
 		ls /boot/firmware | grep -iE "applpi(\.json|-error)" || echo "no settings or error file on boot"
 		sudo -n ls -l /data /data/settings /data/ssh

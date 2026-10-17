@@ -1,7 +1,7 @@
 #!/bin/bash -e
 # A clean screen for when a monitor is connected: the logo while booting, then the Pi's name and address. The boot
 # messages still go to the journal and the kernel log; to see them on screen, remove "quiet loglevel=3" and "splash"
-# from cmdline.txt on the card (or press Esc during boot).
+# from slotA/cmdline.txt on the card (or press Esc during boot).
 
 # The firmware's rainbow square and the kernel's raspberries go; the console blanks (and the monitor sleeps) after 5
 # minutes without a key pressed; the log only shows errors. HDMI is forced on: the Pi 2's hotplug signal is unreliable

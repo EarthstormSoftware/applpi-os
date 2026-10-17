@@ -32,6 +32,17 @@ if [ \$((ROOT_SIZE * 11 / 10)) -gt \$ROOT_PART_SIZE ]; then\n\
 \texit 1\n\
 fi|" "$prerun"
 
+# The OS's boot files go into slot A once the boot partition is complete: after the last update-initramfs, before
+# the image is unmounted
+finalise=export-image/05-finalise/01-run.sh
+anchor='rm -f "${ROOTFS_DIR}/usr/bin/qemu-arm-static"'
+line=$(grep -nxF "$anchor" "$finalise" | cut -d: -f1)
+if [ -z "$line" ] || [ "$(grep -n 'update-initramfs' "$finalise" | head -1 | cut -d: -f1)" -gt "$line" ]; then
+	echo "pi-gen's $finalise has changed: can't place the slot files" >&2
+	exit 1
+fi
+sed -i "${line}i source /pi-gen/export-slots.sh" "$finalise"
+
 # Quick builds reuse stages 0 and 1 (the base system, most of the build's time) from the last build, kept in the
 # applpi-os-work volume: only our stage and the export run again. A full build starts from nothing.
 work="work/${IMG_NAME}"

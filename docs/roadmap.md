@@ -44,12 +44,14 @@ in the way that matters here).
 
 | Partition | Holds | Changed by |
 |---|---|---|
-| boot (FAT) | firmware, `slotA/` and `slotB/` (kernel, device tree, `cmdline.txt`), `applpi.json` until first boot | OS updates (the inactive slot only) |
+| boot (FAT) | firmware, `config.txt`, `slotA/` and `slotB/` (kernels, initramfs, device trees, overlays, `cmdline.txt`), `applpi.json` until first boot | OS updates (the inactive slot only) |
 | root A | the OS, read-only | OS updates |
 | root B | the other OS slot, read-only | OS updates |
 | data (ext4) | `/data/apps/<name>`, app settings, Wi-Fi details, SSH host keys | app deploys |
 
-The firmware's `os_prefix` setting in `config.txt` picks the slot. Both root slots have a fixed size (1.25 GiB,
+The firmware's `os_prefix` setting in `config.txt` picks the slot (the build moves the OS's boot files into
+`slotA/`: `image\export-slots.sh`). The firmware itself (`bootcode.bin`, `start*.elf`, `fixup*.dat`) is shared by
+both slots, so an OS update doesn't change it. Both root slots have a fixed size (1.25 GiB,
 `ROOT_SLOT_MIB` in `image\config`; the root uses about 600 MB), so an update always fits. With the 256 MiB boot
 partition, a 4 GB card keeps about 1 GiB for data. If the root outgrows its slot, apt's package lists, other
 locales and the docs (about 190 MB) can go: nothing is installed on the Pi itself. Root B and the data partition are created on first

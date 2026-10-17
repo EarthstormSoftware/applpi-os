@@ -21,7 +21,7 @@ RUN git clone --depth 1 --branch "${PIGEN_REF}" https://github.com/RPi-Distro/pi
     # The first-boot user rename: the image has a fixed admin user with no password, reached by SSH key only
     && rm -rf /pi-gen/export-image/01-user-rename
 
-COPY config build-in-container.sh /pi-gen/
+COPY config build-in-container.sh export-slots.sh /pi-gen/
 COPY stage2-applpi /pi-gen/stage2-applpi
 RUN chmod +x /pi-gen/build-in-container.sh && find /pi-gen/stage2-applpi -name '*.sh' -exec chmod +x {} +
 

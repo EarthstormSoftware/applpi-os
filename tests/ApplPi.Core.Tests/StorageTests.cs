@@ -42,7 +42,7 @@ public sealed class StorageTests : IDisposable
     [Fact]
     public void RecognisesApplPiCardsOnly()
     {
-        File.WriteAllText(Path.Combine(dir, "cmdline.txt"), "console=tty1");
+        File.WriteAllText(Path.Combine(dir, "config.txt"), "os_prefix=slotA/");
         File.WriteAllText(Path.Combine(dir, "issue.txt"), "Raspberry Pi reference\nGenerated using pi-gen, stage2");
         Assert.False(BootPartition.IsApplPi(dir));
         File.WriteAllText(Path.Combine(dir, "issue.txt"), "Raspberry Pi reference\nGenerated using pi-gen, stage2-applpi");

@@ -69,7 +69,7 @@ public sealed class BootPartition(string root, string description)
     public static bool IsApplPi(string root)
     {
         var issue = Path.Combine(root, "issue.txt");
-        return File.Exists(Path.Combine(root, "cmdline.txt")) && File.Exists(issue)
+        return File.Exists(Path.Combine(root, "config.txt")) && File.Exists(issue)
             && File.ReadAllText(issue).Contains("stage2-applpi");
     }
 }
