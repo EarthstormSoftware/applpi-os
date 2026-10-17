@@ -7,8 +7,9 @@ argument-hint: "[quick]"
 Build the ApplPi OS image. Arguments: $ARGUMENTS (`quick` reuses pi-gen's stages 0 and 1: about 6 minutes instead
 of 20; never use it for a release).
 
-1. Check Docker is running (`docker info --format '{{.ServerVersion}}'`). If it isn't, stop and ask the user to start
-   Docker Desktop: don't try to start it yourself.
+1. Check Docker is running (`docker info --format '{{.ServerVersion}}'`). If it isn't, ask the user whether to start
+   Docker Desktop (`Start-Process "$env:ProgramFiles\Docker\Docker\Docker Desktop.exe"`), then wait until
+   `docker info` succeeds.
 2. Note `git describe --tags --match 'v[0-9]*' --always --dirty`: that's the version the image gets. Say so if it ends
    in `-dirty` (uncommitted changes) so the user isn't surprised.
 3. Run `.\image\build.ps1` (add `-Quick` for `quick`) from the repo root in PowerShell, in the background, with its
