@@ -32,6 +32,19 @@ and ssh never warns or asks about it. Boot the Pi with the card and, after a few
 To change the settings on a card that's already written: `dotnet run --project src\ApplPi.Cli -- setup`. Settings
 are kept in `%APPDATA%\ApplPi`, Wi-Fi passwords and host keys encrypted for your Windows account.
 
+## Updating a Pi's OS
+
+Once a Pi runs ApplPi OS (from the first version with A/B slots), a new image goes on over SSH, with no card reader:
+
+```powershell
+dotnet run --project src\ApplPi.Cli -- update <name>
+```
+
+It sends the newest image in `deploy\` (or the one named after the Pi's name) to the Pi, which writes it into its
+other OS slot and checks it, while the running OS carries on. Then the Pi restarts into the new OS once; if it comes
+back on it, `applpi` keeps it. If it doesn't (power it off and on if it's stuck), it goes back to the OS it had. Apps,
+settings and the host key are on the data partition, so they stay as they were.
+
 With a monitor connected, the Pi shows the ApplPi OS logo while it boots, then its name, addresses, image version and
 build time; an SSH login opens with the same information beside the apple. The screen blanks after 5 minutes without
 a key pressed. The boot messages are in the journal
@@ -51,8 +64,9 @@ from the latest git tag (`v0.1.0`, or `v0.1.0-3-g1ad84dc-dirty` between releases
 time in `/etc/applpi-release` on the Pi and `applpi-release.txt` on the card.
 
 To test it without a Pi, `.\image\test\test-qemu.ps1` boots it in QEMU (generic ARM machine and kernel, so not the
-Pi's kernel, firmware or Wi-Fi) and checks first boot, the settings, SSH and the read-only root: about 35 minutes for
-two boots (use for releases), or about 20 with `-Quick` (one boot). The results go in `deploy\test\`.
+Pi's kernel, firmware or Wi-Fi) and checks first boot, the settings, SSH and the read-only root. The full test (use
+for releases) then updates the card to the same image and boots the other slot; `-Quick` boots once, in about 20
+minutes. The results go in `deploy\test\`.
 
 ## Licence
 

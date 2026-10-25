@@ -27,7 +27,7 @@ install -m 755 files/boot-generator "${ROOTFS_DIR}/usr/lib/systemd/system-genera
 # The data partition and per-Pi settings
 install -d "${ROOTFS_DIR}/data"
 install -d "${ROOTFS_DIR}/usr/lib/applpi"
-install -m 755 files/mount-data files/apply-settings "${ROOTFS_DIR}/usr/lib/applpi/"
+install -m 755 files/mount-data files/apply-settings files/os-update "${ROOTFS_DIR}/usr/lib/applpi/"
 install -m 644 files/applpi-data.service files/applpi-settings.service "${ROOTFS_DIR}/etc/systemd/system/"
 
 # Logs in RAM

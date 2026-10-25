@@ -3,10 +3,12 @@
 # sharing /work:
 #   unpack <image.img.xz>  (applpi-os-tester, privileged)  the image as a 4 GB card, and overlayroot's initramfs files
 #   kernel                 (applpi-os-test-kernel, ARM)     Debian's generic ARM kernel and an initramfs with overlayroot
-#   boot [quick]           (applpi-os-tester, privileged)  boots the card twice (once if quick) and checks it over SSH;
-#                                                          results in /work/out
+#   boot full|quick <image.img.xz>
+#                          (applpi-os-tester, privileged)  boots the card and checks it over SSH; results in /work/out.
+#                                                          Full: then updates it to the same image (os-update write)
+#                                                          and boots slot B as tryboot would.
 # QEMU's Pi 2 model can't read the SD card with the Pi kernel, so this tests everything of ours (first boot, settings,
-# SSH, read-only root) but not the Pi's kernel, firmware or Wi-Fi.
+# SSH, read-only root, writing an update) but not the Pi's kernel, firmware (os_prefix, tryboot) or Wi-Fi.
 set -euo pipefail
 
 work=/work
@@ -41,15 +43,11 @@ kernel() {
 }
 
 boot() {
-	local quick=${1:-}
+	local quick=$1 image_xz=$2
 	local out=$work/out
 	rm -rf "$out"; mkdir -p "$out"
 
-	# The generic kernel's modules go into the test card's root, so the Pi image needn't carry them
-	mkdir -p /mnt/root
-	mount -o loop,offset="$(offset 2)" "$img" /mnt/root
-	cp -a "$work/modules/." /mnt/root/usr/lib/modules/
-	umount /mnt/root
+	add_modules 2
 
 	# Throwaway keys and test settings (no Wi-Fi in QEMU). The Pi's host key is sent with them, as applpi does, and
 	# ssh trusts only that key: a Pi that made its own wouldn't be reachable.
@@ -62,22 +60,57 @@ boot() {
 		  "host_key": "$(awk '{printf "%s\\n", $0}' /tmp/hostkey)" }
 	EOF
 	mcopy -o -i "$boot_img" /tmp/applpi.json ::applpi.json
-	mcopy -o -i "$boot_img" ::slotA/cmdline.txt /tmp/cmdline.txt
-	# Emulation is slow: finding the devices can take minutes, longer than systemd's usual 90 s wait. AppArmor is
-	# off for the test boots only: loading its profiles takes minutes when emulated, and tests nothing of ours.
-	cmdline="$(sed 's/console=[^ ]*//g' /tmp/cmdline.txt | tr -s ' ' | tr -d '\n') console=ttyAMA0 net.ifnames=0"
-	cmdline="$cmdline systemd.default_device_timeout_sec=900 apparmor=0"
-	echo "Kernel command line: $cmdline"
+	slot_cmdline A
 
 	# The file written to /etc on the first boot must be gone on the second (the root's changes are in RAM)
-	run_boot 1 && checks 1 && ssh_pi 'sudo -n touch /etc/test-overlay; sudo -n systemctl poweroff' || true
+	if run_boot 1 && checks 1; then
+		ssh_pi 'sudo -n touch /etc/test-overlay' || true
+		if [ "$quick" != quick ]; then
+			update "$image_xz"
+		fi
+		ssh_pi 'sudo -n systemctl poweroff' || true
+	fi
 	stop_qemu
 	if [ "$quick" != quick ]; then
-		run_boot 2 && checks 2 && ssh_pi 'ls /etc/test-overlay; sudo -n systemctl poweroff' >> "$out/checks-2.log" 2>&1 || true
+		# As tryboot would: slot B's cmdline.txt, whose root is partition 3
+		add_modules 3
+		slot_cmdline B
+		run_boot 2 && checks 2 && ssh_pi 'ls /etc/test-overlay; sudo -n /usr/lib/applpi/os-update commit; sudo -n systemctl poweroff' \
+			>> "$out/checks-2.log" 2>&1 || true
 		stop_qemu
 	fi
 	echo "== Boot partition after" | tee -a "$out/summary.log"
 	mdir -i "$boot_img" :: | grep -iE "applpi(\.json|-error)" | tee -a "$out/summary.log" || echo "no settings or error file" | tee -a "$out/summary.log"
+}
+
+# The generic kernel's modules go into the root of slot partition $1, so the Pi image needn't carry them
+add_modules() {
+	mkdir -p /mnt/root
+	mount -o loop,offset="$(offset "$1")" "$img" /mnt/root
+	cp -a "$work/modules/." /mnt/root/usr/lib/modules/
+	umount /mnt/root
+}
+
+# The kernel command line from slot $1's cmdline.txt, for QEMU's serial console. Emulation is slow: finding the
+# devices can take minutes, longer than systemd's usual 90 s wait. AppArmor is off for the test boots only: loading
+# its profiles takes minutes when emulated, and tests nothing of ours.
+slot_cmdline() {
+	mcopy -o -i "$img@@$(offset 1)" "::slot$1/cmdline.txt" /tmp/cmdline.txt
+	cmdline="$(sed 's/console=[^ ]*//g' /tmp/cmdline.txt | tr -s ' ' | tr -d '\n') console=ttyAMA0 net.ifnames=0"
+	cmdline="$cmdline systemd.default_device_timeout_sec=900 apparmor=0"
+	echo "Kernel command line (slot $1): $cmdline"
+}
+
+# An OS update to the same image, as applpi update sends it
+update() {
+	echo "== Update" | tee -a "$work/out/summary.log"
+	if ssh_pi 'sudo -n /usr/lib/applpi/os-update write' < "$1" > "$work/out/update.log" 2>&1; then
+		echo "Written to slot B" | tee -a "$work/out/summary.log"
+	else
+		echo "Update failed: $(tail -1 "$work/out/update.log")" | tee -a "$work/out/summary.log"
+	fi
+	ssh_pi 'sudo -n /usr/lib/applpi/os-update status; grep ^os_prefix /boot/firmware/tryboot.txt; ls /boot/firmware/slotB | grep -v dtb' \
+		>> "$work/out/update.log" 2>&1 || true
 }
 
 run_boot() {
@@ -128,7 +161,8 @@ checks() {
 run_checks() {
 	ssh_pi 'set -x
 		cat /etc/applpi-release; hostname; uptime
-		findmnt -n / ; findmnt -n /data ; findmnt -n /boot/firmware
+		findmnt -n / ; findmnt -n /media/root-ro ; findmnt -n /data ; findmnt -n /boot/firmware
+		sudo -n /usr/lib/applpi/os-update status
 		grep -c PARTUUID /etc/fstab /media/root-ro/etc/fstab; systemctl is-active boot-firmware.mount
 		ls /boot/firmware /boot/firmware/slotA | grep -vE "\.dtb$"; grep "^os_prefix" /boot/firmware/config.txt
 		lsblk -o NAME,SIZE,FSTYPE,LABEL

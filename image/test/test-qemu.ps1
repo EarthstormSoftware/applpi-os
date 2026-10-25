@@ -5,8 +5,9 @@ Boots a built ApplPi OS image in QEMU and checks it over SSH.
 .DESCRIPTION
 Boots the image on QEMU's generic ARM machine with Debian's generic ARM kernel (QEMU's Pi 2 model can't read the SD
 card with the Pi kernel). This checks first boot (root B and the data partition), applpi.json, SSH by key, the
-read-only root and what listens on the network; and on a second boot, that the host key stays the same and the
-root's changes are gone. Not the Pi's own kernel, firmware or Wi-Fi. About 35 minutes; -Quick (one boot) about 15.
+read-only root and what listens on the network. The full test then writes an OS update (the same image, into slot B)
+and boots slot B, as tryboot would: the host key must stay the same and the root's changes be gone. Not the Pi's own
+kernel, firmware (os_prefix, tryboot) or Wi-Fi. -Quick (one boot) takes about 20 minutes.
 Results go to deploy\test\.
 
 .PARAMETER Image
@@ -51,7 +52,8 @@ Get-ChildItem $results | Remove-Item -Recurse -Force
 try {
     Invoke-Step @('--privileged', '-v', "$(Split-Path $Image):/image:ro", 'applpi-os-tester') @('unpack', "/image/$(Split-Path -Leaf $Image)")
     Invoke-Step @('--platform', 'linux/arm/v7', 'applpi-os-test-kernel') @('kernel')
-    Invoke-Step @('--privileged', 'applpi-os-tester') @('boot', $(if ($Quick) { 'quick' } else { 'full' }))
+    Invoke-Step @('--privileged', '-v', "$(Split-Path $Image):/image:ro", 'applpi-os-tester') `
+        @('boot', $(if ($Quick) { 'quick' } else { 'full' }), "/image/$(Split-Path -Leaf $Image)")
 }
 finally {
     $ErrorActionPreference = 'Continue'

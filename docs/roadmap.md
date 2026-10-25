@@ -52,8 +52,10 @@ in the way that matters here).
 The firmware's `os_prefix` setting in `config.txt` picks the slot (the build moves the OS's boot files into
 `slotA/`: `image\export-slots.sh`). The firmware itself (`bootcode.bin`, `start*.elf`, `fixup*.dat`) is shared by
 both slots, so an OS update doesn't change it. Both root slots have a fixed size (1.25 GiB,
-`ROOT_SLOT_MIB` in `image\config`; the root uses about 600 MB), so an update always fits. With the 256 MiB boot
-partition, a 4 GB card keeps about 1 GiB for data. If the root outgrows its slot, apt's package lists, other
+`ROOT_SLOT_MIB` in `image\config`; the root uses about 600 MB), so an update always fits. The boot partition is 384 MiB: the
+firmware is about 23 MB and a slot's boot files about 57 MB, so it holds both slots with room for them to double, and
+the build checks the other slot would fit twice over. (It can't grow once a Pi is in use, as the root slots follow
+it.) A 4 GB card keeps about 0.8 GiB for data. If the root outgrows its slot, apt's package lists, other
 locales and the docs (about 190 MB) can go: nothing is installed on the Pi itself. Root B and the data partition are created on first
 boot (`applpi-data.service`), the data partition filling the rest of the card. The SSH host key lives on the data
 partition, so a Pi keeps the same identity across OS updates.
@@ -81,6 +83,18 @@ The new slot sees it was tried (`/proc/device-tree/chosen/bootloader/tryboot` is
 answering), makes itself permanent by switching `config.txt`. Any reset before that (the hardware watchdog if it
 hangs, a power cut, a kernel that doesn't start) boots `config.txt`, the old slot, again. Checked on the Pi 2 (firmware
 of Sep 2026): tryboot.txt was used for exactly one boot.
+
+`applpi update <name>` sends the `.img.xz` over SSH to `os-update write` on the Pi
+(`/usr/lib/applpi/os-update`, Python, as root). It decompresses as the image arrives, writes the image's root
+partition straight into the other slot's partition and reads it back to compare checksums, and keeps the boot
+partition (as a sparse file on the data partition) just long enough to copy its `slotA/` into the other slot's
+folder, with `root=` in its `cmdline.txt` set for that slot. Then it writes `tryboot.txt`: the new image's
+`config.txt`, starting the new slot. `os-update try` restarts with tryboot, and `applpi` waits for the Pi to answer
+from a new boot (the boot ID changes). If it's running the new slot after a tryboot, `os-update commit` makes it
+permanent: `tryboot.txt` becomes `config.txt`. Until the automatic check and the watchdog (next), answering over SSH
+is the health check, and a Pi that hangs on the new slot needs its power cycling to go back. The running slot is
+never written, and a slot on trial can't be updated until it's kept or left. The firmware isn't updated (only
+flashing changes it). The full QEMU test writes an update and boots the other slot, but QEMU can't do tryboot.
 
 Nothing in the root names the image's own partition IDs, because an update puts another image (with other IDs) in
 the other slot. `fstab` only has `/proc`: the initramfs mounts the root named by `root=PARTUUID=` on the kernel

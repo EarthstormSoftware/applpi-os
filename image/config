@@ -13,7 +13,9 @@ TARGET_HOSTNAME=applpi
 FIRST_USER_NAME=applpi
 
 # Size of each root slot (A and B). Fixed, so root B (made on first boot) matches root A and an update always fits.
-# With a 256 MiB boot partition, a 4 GB card (about 3.7 GiB) keeps about 1 GiB for data.
+# With the 384 MiB boot partition, a 4 GB card (about 3.7 GiB) keeps about 0.8 GiB for data.
 ROOT_SLOT_MIB=1280
-# The boot partition holds the firmware and, from step 4, a kernel and initramfs per slot (about 110 MB in all)
-BOOT_MIB=256
+# The boot partition holds the firmware (about 23 MB) and each slot's boot files (about 57 MB): room for both slots
+# with plenty to spare, as it can't grow once a Pi is in use (the root slots follow it). The build checks that the
+# other slot fits twice over (export-slots.sh).
+BOOT_MIB=384

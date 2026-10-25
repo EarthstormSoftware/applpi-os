@@ -1,0 +1,345 @@
+#!/usr/bin/python3
+"""ApplPi OS updates (A/B slots). Run as root; applpi update on Windows runs these over SSH.
+
+  os-update status   which slot is running, which is permanent, which is waiting to be tried, and what each holds
+  os-update write    reads an ApplPi OS image (.img.xz) on stdin and writes it into the slot that isn't running:
+                     its root partition (checked by reading it back) and its boot files, then tryboot.txt
+  os-update try      restarts into the written slot, for one boot (the firmware's tryboot)
+  os-update commit   makes the running slot permanent (config.txt), after a tryboot into it
+
+The running slot is never written, and config.txt only changes on commit, so any failure, power cut or hang before
+then leaves the Pi starting the OS it had.
+"""
+
+import hashlib
+import lzma
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+BOOT = Path("/boot/firmware")
+WORK = Path("/data/.os-update")
+TRYBOOT_FLAG = Path("/proc/device-tree/chosen/bootloader/tryboot")
+# The root partition of each slot
+SLOTS = {"A": 2, "B": 3}
+CHUNK = 4 << 20
+ZEROS = memoryview(bytes(CHUNK))
+FIRMWARE = re.compile(r"(bootcode\.bin|start.*\.elf|fixup.*\.dat)", re.IGNORECASE)
+
+
+class UpdateError(Exception):
+    pass
+
+
+def say(message):
+    print(message, file=sys.stderr, flush=True)
+
+
+def running():
+    """The card's disk ID and the running slot, from root=PARTUUID=<disk ID>-<partition> on the kernel command line."""
+    found = re.search(r"\broot=PARTUUID=([0-9a-fA-F]{8})-([0-9]{2})\b", Path("/proc/cmdline").read_text())
+    if not found:
+        raise UpdateError("Not started from an ApplPi card: no root=PARTUUID= on the kernel command line.")
+    partition = int(found.group(2))
+    slot = next((name for name, number in SLOTS.items() if number == partition), None)
+    if slot is None:
+        raise UpdateError(f"The root is partition {partition}, which isn't a slot.")
+    return found.group(1).lower(), slot
+
+
+def other(slot):
+    return "B" if slot == "A" else "A"
+
+
+def tried():
+    """Whether this boot is a tryboot: the firmware sets the flag for that one boot."""
+    return TRYBOOT_FLAG.exists() and int.from_bytes(TRYBOOT_FLAG.read_bytes()[:4], "big") == 1
+
+
+def prefix_slot(config):
+    """The slot a config.txt (or tryboot.txt) starts, from its os_prefix=slotX/ line, or None."""
+    if not config.exists():
+        return None
+    found = re.search(r"^os_prefix=slot([AB])/\s*$", config.read_text(), re.MULTILINE)
+    return found.group(1) if found else None
+
+
+def release(directory):
+    """'<version> (build <stamp>)' from a directory's applpi-release.txt, or '' without one."""
+    file = directory / "applpi-release.txt"
+    if not file.exists():
+        return ""
+    values = dict(line.split("=", 1) for line in file.read_text().splitlines() if "=" in line)
+    return f"{values.get('VERSION', '?')} (build {values.get('BUILD_STAMP', '?')})"
+
+
+def status():
+    _, slot = running()
+    print(f"boot={Path('/proc/sys/kernel/random/boot_id').read_text().strip()}")
+    print(f"running={slot}")
+    print(f"tryboot={int(tried())}")
+    print(f"permanent={prefix_slot(BOOT / 'config.txt') or ''}")
+    print(f"waiting={prefix_slot(BOOT / 'tryboot.txt') or ''}")
+    for name in SLOTS:
+        print(f"slot{name}={release(BOOT / f'slot{name}')}")
+
+
+def decompressed(source):
+    """The image, decompressed a chunk at a time (an .xz file's own checksums catch a damaged or cut-short image)."""
+    decompressor = lzma.LZMADecompressor(format=lzma.FORMAT_XZ)
+    while not decompressor.eof:
+        if decompressor.needs_input:
+            data = source.read(1 << 20)
+            if not data:
+                raise UpdateError("The image ended early: it's damaged, or the connection was lost.")
+        else:
+            data = b""
+        chunk = decompressor.decompress(data, max_length=CHUNK)
+        if chunk:
+            yield chunk
+    # Whatever follows (nothing, normally) is read, so the sender doesn't see the connection close early
+    while source.read(1 << 20):
+        pass
+
+
+class Reader:
+    """Reads a stream of chunks by exact lengths, in order."""
+
+    def __init__(self, chunks):
+        self.chunks = chunks
+        self.buffer = memoryview(b"")
+        self.position = 0
+
+    def read(self, length):
+        """The next length bytes, as chunks."""
+        while length > 0:
+            if not self.buffer:
+                self.buffer = memoryview(next(self.chunks, b""))
+                if not self.buffer:
+                    raise UpdateError("The image is shorter than its partition table says.")
+            part = self.buffer[:length]
+            self.buffer = self.buffer[len(part):]
+            self.position += len(part)
+            length -= len(part)
+            yield part
+
+    def skip_to(self, position):
+        if position < self.position:
+            raise UpdateError("The image's partitions aren't in order.")
+        for _ in self.read(position - self.position):
+            pass
+
+
+def partitions(mbr):
+    """(type, start byte, length in bytes) of an image's first two partitions: boot (FAT) and root (Linux)."""
+    if len(mbr) < 512 or mbr[510:512] != b"\x55\xaa":
+        raise UpdateError("This isn't a disk image: it has no partition table.")
+    found = []
+    for entry in range(2):
+        fields = mbr[446 + entry * 16:462 + entry * 16]
+        found.append((fields[4], int.from_bytes(fields[8:12], "little") * 512, int.from_bytes(fields[12:16], "little") * 512))
+    (boot_type, _, _), (root_type, _, _) = found
+    if boot_type not in (0x0B, 0x0C) or root_type != 0x83:
+        raise UpdateError("This isn't an ApplPi OS image: its first partitions aren't boot (FAT) and root (Linux).")
+    return found[0][1:], found[1][1:]
+
+
+def size_of(device):
+    with open(device, "rb") as file:
+        return file.seek(0, os.SEEK_END)
+
+
+def drop_caches():
+    """Writes everything out and forgets the cached copy, so reading back reads the card."""
+    os.sync()
+    Path("/proc/sys/vm/drop_caches").write_text("3\n")
+
+
+def unpack(source, boot_image, root_device):
+    """Writes the image's boot partition to a (sparse) file and its root partition to the slot's partition. Returns
+    the root's length and SHA-256."""
+    reader = Reader(decompressed(source))
+    mbr = b"".join(bytes(part) for part in reader.read(512))
+    (boot_start, boot_length), (root_start, root_length) = partitions(mbr)
+    if root_length > size_of(root_device):
+        raise UpdateError(f"The image's root ({root_length >> 20} MiB) is bigger than the slot's partition.")
+
+    reader.skip_to(boot_start)
+    with open(boot_image, "wb") as file:
+        for part in reader.read(boot_length):
+            # The partition is mostly empty space: left as holes in the file
+            for start in range(0, len(part), 64 << 10):
+                piece = part[start:start + (64 << 10)]
+                if piece == ZEROS[:len(piece)]:
+                    file.seek(len(piece), os.SEEK_CUR)
+                else:
+                    file.write(piece)
+        file.truncate(boot_length)
+
+    reader.skip_to(root_start)
+    digest = hashlib.sha256()
+    written = 0
+    shown = 0
+    with open(root_device, "r+b", buffering=0) as device:
+        for part in reader.read(root_length):
+            digest.update(part)
+            written += len(part)
+            while part:
+                part = part[device.write(part):]
+            if written - shown >= 256 << 20:
+                shown = written
+                say(f"  {written >> 20} of {root_length >> 20} MiB written")
+        os.fsync(device.fileno())
+    # The rest of the stream, to its end, so its checksum is checked
+    for _ in reader.chunks:
+        pass
+    return root_length, digest.hexdigest()
+
+
+def check_root(root_device, length, expected):
+    digest = hashlib.sha256()
+    with open(root_device, "rb", buffering=0) as device:
+        remaining = length
+        while remaining > 0:
+            data = device.read(min(CHUNK, remaining))
+            if not data:
+                break
+            digest.update(data)
+            remaining -= len(data)
+    if remaining or digest.hexdigest() != expected:
+        raise UpdateError("The slot's partition doesn't read back as written: the card may be failing.")
+
+
+def file_hash(path):
+    with open(path, "rb") as file:
+        return hashlib.file_digest(file, "sha256").hexdigest()
+
+
+def copy_slot(source, destination):
+    """Copies a slot's boot files (FAT can't keep owners or modes, so only the contents) and checks the copies."""
+    for directory, _, files in os.walk(source):
+        relative = Path(directory).relative_to(source)
+        (destination / relative).mkdir(parents=True, exist_ok=True)
+        for name in files:
+            shutil.copyfile(Path(directory) / name, destination / relative / name)
+    drop_caches()
+    for directory, _, files in os.walk(source):
+        relative = Path(directory).relative_to(source)
+        for name in files:
+            if file_hash(Path(directory) / name) != file_hash(destination / relative / name):
+                raise UpdateError(f"{relative / name} doesn't read back as written on the boot partition.")
+
+
+def replace_file(path, text):
+    """Writes a file on the boot partition as nearly all at once as FAT allows: a new file, then a rename."""
+    new = path.with_name(path.name + ".new")
+    new.write_text(text)
+    os.sync()
+    os.replace(new, path)
+    os.sync()
+
+
+def write():
+    disk, slot = running()
+    if prefix_slot(BOOT / "config.txt") != slot:
+        raise UpdateError(f"Slot {slot} is running on trial: run 'os-update commit' to keep it (or restart to go "
+                          f"back to slot {other(slot)}) before updating again.")
+    target = other(slot)
+    root_device = Path(f"/dev/disk/by-partuuid/{disk}-{SLOTS[target]:02d}")
+    if not root_device.exists():
+        raise UpdateError(f"Slot {target}'s root partition ({root_device}) isn't on the card.")
+    real = os.path.realpath(root_device)
+    if any(os.path.realpath(line.split()[0]) == real for line in Path("/proc/mounts").read_text().splitlines()):
+        raise UpdateError(f"Slot {target}'s root partition is mounted: not writing it.")
+
+    # Nothing may try the slot while it's being written
+    (BOOT / "tryboot.txt").unlink(missing_ok=True)
+    shutil.rmtree(WORK, ignore_errors=True)
+    WORK.mkdir(mode=0o700)
+    mounted = WORK / "image"
+    try:
+        say(f"Writing the new OS into slot {target} (slot {slot} is running)")
+        root_length, root_hash = unpack(sys.stdin.buffer, WORK / "boot.img", root_device)
+        say("Checking the root partition")
+        drop_caches()
+        check_root(root_device, root_length, root_hash)
+
+        mounted.mkdir()
+        subprocess.run(["mount", "-o", "loop,ro", str(WORK / "boot.img"), str(mounted)], check=True)
+        if not (mounted / "slotA").is_dir() or prefix_slot(mounted / "config.txt") != "A":
+            raise UpdateError("This image is from before A/B updates: it can only be flashed.")
+
+        say(f"Copying the boot files into slot{target}/")
+        slot_dir = BOOT / f"slot{target}"
+        new_dir = BOOT / f"slot{target}.new"
+        shutil.rmtree(slot_dir, ignore_errors=True)
+        shutil.rmtree(new_dir, ignore_errors=True)
+        copy_slot(mounted / "slotA", new_dir)
+        cmdline = (new_dir / "cmdline.txt").read_text()
+        cmdline, count = re.subn(r"\broot=PARTUUID=\S+", f"root=PARTUUID={disk}-{SLOTS[target]:02d}", cmdline)
+        if count != 1:
+            raise UpdateError("The image's cmdline.txt doesn't name its root.")
+        replace_file(new_dir / "cmdline.txt", cmdline)
+        shutil.copyfile(mounted / "applpi-release.txt", new_dir / "applpi-release.txt")
+        os.sync()
+        os.rename(new_dir, slot_dir)
+
+        firmware = [path.name for path in mounted.iterdir() if FIRMWARE.fullmatch(path.name)]
+        if any(not (BOOT / name).exists() or file_hash(mounted / name) != file_hash(BOOT / name) for name in firmware):
+            say("The new image has different firmware: OS updates keep this card's (only flashing changes it).")
+
+        # The new image's config.txt, starting the new slot, for one boot
+        config, count = re.subn(r"^os_prefix=slotA/\s*$", f"os_prefix=slot{target}/", (mounted / "config.txt").read_text(),
+                                flags=re.MULTILINE)
+        replace_file(BOOT / "tryboot.txt", config)
+        say(f"Slot {target} is ready to try: {release(slot_dir)}")
+    finally:
+        if os.path.ismount(mounted):
+            subprocess.run(["umount", str(mounted)], check=False)
+        shutil.rmtree(WORK, ignore_errors=True)
+
+
+def try_slot():
+    _, slot = running()
+    waiting = prefix_slot(BOOT / "tryboot.txt")
+    if waiting is None or waiting == slot:
+        raise UpdateError("No update is waiting to be tried: run 'os-update write' first.")
+    say(f"Restarting into slot {waiting} for one boot")
+    subprocess.run(["systemctl", "--no-block", "--reboot-argument=0 tryboot", "reboot"], check=True)
+
+
+def commit():
+    _, slot = running()
+    if prefix_slot(BOOT / "config.txt") == slot:
+        say(f"Slot {slot} is already permanent.")
+        return
+    if not tried() or prefix_slot(BOOT / "tryboot.txt") != slot:
+        raise UpdateError(f"Slot {slot} wasn't started by tryboot: not making it permanent.")
+    replace_file(BOOT / "config.txt", (BOOT / "tryboot.txt").read_text())
+    shutil.copyfile(BOOT / f"slot{slot}" / "applpi-release.txt", BOOT / "applpi-release.txt")
+    (BOOT / "tryboot.txt").unlink()
+    os.sync()
+    say(f"Slot {slot} is now permanent: {release(BOOT / f'slot{slot}')}")
+
+
+def main():
+    commands = {"status": status, "write": write, "try": try_slot, "commit": commit}
+    if len(sys.argv) != 2 or sys.argv[1] not in commands:
+        print(__doc__, file=sys.stderr)
+        return 2
+    if os.geteuid() != 0:
+        print("os-update runs as root: sudo os-update ...", file=sys.stderr)
+        return 1
+    try:
+        commands[sys.argv[1]]()
+    except UpdateError as error:
+        say(str(error))
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

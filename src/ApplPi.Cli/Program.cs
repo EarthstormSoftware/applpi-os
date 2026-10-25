@@ -20,6 +20,10 @@ static class Program
           applpi setup [name]   Ask for a Pi's settings (name, Wi-Fi, time zone, SSH key) and put them on its card.
                                 Works on a card written with the ApplPi OS image, in this PC's card reader.
                                 The Pi reads them at its next boot, then deletes them from the card.
+          applpi update [name] [image]
+                                Update a Pi's OS over SSH (the image defaults to the newest in deploy\). The new OS
+                                goes into the slot that isn't running, and the Pi restarts into it once; it's kept
+                                if the Pi comes back on it, and otherwise the Pi goes back to the OS it had.
           applpi --version      Show this tool's version.
 
         Settings are remembered in %APPDATA%\ApplPi (Wi-Fi passwords encrypted for your Windows account).
@@ -37,6 +41,9 @@ static class Program
                 ["flash", "--elevated"] => Flash(null, elevated: true),
                 ["flash", var image] => Flash(image, elevated: false),
                 ["flash", var image, "--elevated"] => Flash(image, elevated: true),
+                ["update"] => Update(null, null),
+                ["update", var name] => Update(name, null),
+                ["update", var name, var image] => Update(name, image),
                 ["--version"] => ShowVersion(),
                 _ => ShowUsage(),
             };
@@ -61,7 +68,8 @@ static class Program
         return 2;
     }
 
-    static int Flash(string? image, bool elevated)
+    /// <summary>The image named, or the newest in deploy\; null (having said why) if there isn't one.</summary>
+    static string? FindImage(string? image)
     {
         image ??= Directory.Exists("deploy")
             ? Directory.GetFiles("deploy", "applpi-os-*.img.xz").OrderBy(File.GetLastWriteTimeUtc).LastOrDefault()
@@ -71,9 +79,18 @@ static class Program
             Console.Error.WriteLine(image is null
                 ? "No image found in deploy\\: build one with image\\build.ps1, or name the .img.xz file."
                 : $"No such image: {image}");
+            return null;
+        }
+        return Path.GetFullPath(image);
+    }
+
+    static int Flash(string? image, bool elevated)
+    {
+        image = FindImage(image);
+        if (image is null)
+        {
             return 1;
         }
-        image = Path.GetFullPath(image);
 
         if (!elevated)
         {
@@ -268,6 +285,149 @@ static class Program
             Console.WriteLine("No Wi-Fi: connect the Pi with an Ethernet cable.");
         }
         return 0;
+    }
+
+    static int Update(string? name, string? image)
+    {
+        var store = DeviceStore.Load(DeviceStore.DefaultPath);
+        name = Ask("Pi name", name?.ToLowerInvariant() ?? store.LastDevice,
+            answer => SettingsRules.CheckHostname(answer.ToLowerInvariant())).ToLowerInvariant();
+        image = FindImage(image);
+        if (image is null)
+        {
+            return 1;
+        }
+
+        var pi = new PiShell(PiShell.HostFor(name));
+        Console.WriteLine($"Connecting to {pi.Host}");
+        SlotStatus before;
+        try
+        {
+            before = SlotStatus.Parse(pi.Run($"{SlotStatus.Command} status"));
+        }
+        catch (PiCommandException error) when (!error.Unreachable)
+        {
+            Console.Error.WriteLine($"{name} can't be updated over SSH ({error.Message}): its OS is from before OS " +
+                "updates, so flash it once with applpi flash.");
+            return 1;
+        }
+        if (before.Permanent != before.Running)
+        {
+            Console.Error.WriteLine($"{name} is running slot {before.Running} on trial: restart it (it goes back to " +
+                $"slot {before.Permanent}) or keep it with 'sudo /usr/lib/applpi/os-update commit' first.");
+            return 1;
+        }
+        var target = before.Other;
+        Console.WriteLine($"""
+            {name} runs slot {before.Running}: ApplPi OS {before.Holds(before.Running)}.
+            Slot {target} ({before.Holds(target)}) gets {Path.GetFileName(image)}.
+            """);
+        var confirm = Ask("Update it? (y/n)", "y", answer => answer is "y" or "n" ? null : "Answer y or n.");
+        if (confirm != "y")
+        {
+            Console.WriteLine("Stopped: nothing was changed.");
+            return 1;
+        }
+
+        // The Pi decompresses and writes as the image arrives; its messages come between the progress lines
+        var size = new FileInfo(image).Length;
+        var console = new object();
+        var progressLine = "";
+        void Message(string text)
+        {
+            lock (console)
+            {
+                Console.WriteLine($"\r{text}".PadRight(progressLine.Length + 1));
+                Console.Write(progressLine);
+            }
+        }
+        try
+        {
+            pi.Run($"{SlotStatus.Command} write", image, new ConsoleProgress<long>(sent =>
+            {
+                var line = $"\rSent {(double)sent / size:P0} of the image ({sent / (1 << 20)} of {size / (1 << 20)} MiB)   ";
+                lock (console)
+                {
+                    if (line != progressLine)
+                    {
+                        Console.Write(line);
+                        progressLine = line;
+                    }
+                }
+            }), Message);
+        }
+        catch (PiCommandException error)
+        {
+            Console.WriteLine();
+            Console.Error.WriteLine($"The update wasn't written: {error.Message} {name} still runs slot {before.Running}, " +
+                "unchanged.");
+            return 1;
+        }
+        lock (console)
+        {
+            progressLine = "";
+            Console.WriteLine();
+        }
+
+        Console.WriteLine($"Restarting {name} into slot {target}, once. If it doesn't come back on it, it goes back to " +
+            $"slot {before.Running} at its next restart.");
+        try
+        {
+            pi.Run($"{SlotStatus.Command} try", Message);
+        }
+        catch (PiCommandException error) when (error.Unreachable)
+        {
+            // The connection can close as the Pi goes down
+        }
+
+        var after = WaitForRestart(pi, before.Boot, TimeSpan.FromMinutes(10));
+        if (after is null)
+        {
+            Console.Error.WriteLine($"""
+                {name} didn't answer within 10 minutes. If it's stuck, power it off and on: it starts slot
+                {before.Running} again. Then 'applpi update {name}' shows where it is.
+                """);
+            return 1;
+        }
+        if (after.Running != target || !after.Tryboot)
+        {
+            Console.Error.WriteLine($"{name} came back on slot {after.Running}: slot {target} didn't start, so it " +
+                "kept the OS it had.");
+            return 1;
+        }
+
+        pi.Run($"{SlotStatus.Command} commit", Message);
+        Console.WriteLine($"Done: {name} runs ApplPi OS {after.Holds(target)} from slot {target}.");
+        return 0;
+    }
+
+    /// <summary>
+    /// Waits for a restarting Pi to answer over SSH from a new boot (until it has gone down, the old one answers),
+    /// and returns its slots then.
+    /// </summary>
+    static SlotStatus? WaitForRestart(PiShell pi, string oldBoot, TimeSpan limit)
+    {
+        var deadline = DateTime.UtcNow + limit;
+        Console.Write("Waiting for it");
+        while (DateTime.UtcNow < deadline)
+        {
+            Thread.Sleep(TimeSpan.FromSeconds(10));
+            try
+            {
+                var status = SlotStatus.Parse(pi.Run($"{SlotStatus.Command} status", connectTimeoutSeconds: 10));
+                if (status.Boot != oldBoot)
+                {
+                    Console.WriteLine();
+                    return status;
+                }
+            }
+            catch (PiCommandException error) when (error.Unreachable)
+            {
+            }
+            Console.Write('.');
+        }
+        Console.WriteLine();
+        return null;
     }
 
     static BootPartition? ChooseCard()
