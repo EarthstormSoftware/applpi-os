@@ -406,8 +406,11 @@ static class Program
         }
         if (after.Running != target || !after.Tryboot)
         {
-            Console.Error.WriteLine($"{name} came back on slot {after.Running}: slot {target} didn't start, so it " +
-                "kept the OS it had.");
+            Console.Error.WriteLine(after.FailureOf(target) is { } failure
+                ? $"{name} came back on slot {after.Running}: slot {target} started, but it wasn't kept ({failure})."
+                : $"{name} came back on slot {after.Running}: slot {target} didn't get as far as checking itself (it " +
+                    "didn't start, or hung).");
+            Console.Error.WriteLine($"It still runs ApplPi OS {after.Holds(after.Running)}, as before.");
             return 1;
         }
 
@@ -423,8 +426,11 @@ static class Program
             after = WaitForCheck(pi, after, TimeSpan.FromMinutes(10));
             if (after?.Permanent != target)
             {
-                Console.Error.WriteLine(after?.Check is { } check && check.StartsWith("failed", StringComparison.Ordinal)
-                    ? $"{name} didn't keep slot {target} ({check[7..].Trim()}): it's going back to slot {before.Running}."
+                var why = after?.Check is { } check && check.StartsWith("failed:", StringComparison.Ordinal)
+                    ? check["failed:".Length..].Trim()
+                    : after?.FailureOf(target);
+                Console.Error.WriteLine(why is not null
+                    ? $"{name} didn't keep slot {target} ({why}): it goes back to slot {before.Running}, as it was."
                     : $"{name} didn't keep slot {target}: it goes back to slot {before.Running} at its next restart.");
                 return 1;
             }

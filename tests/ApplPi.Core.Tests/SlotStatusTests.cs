@@ -51,6 +51,16 @@ public class SlotStatusTests
     }
 
     [Fact]
+    public void ReadsWhyTheLastTrialFailed()
+    {
+        var status = SlotStatus.Parse(FreshCard + "\nlast=B failed: failed units: applpi-test-broken.service\n");
+        Assert.Equal("failed units: applpi-test-broken.service", status.FailureOf("B"));
+        Assert.Null(status.FailureOf("A"));
+        Assert.Null(SlotStatus.Parse(FreshCard + "\nlast=B kept\n").FailureOf("B"));
+        Assert.Null(SlotStatus.Parse(FreshCard).Last);
+    }
+
+    [Fact]
     public void ReadsWhatThePiCanDo()
     {
         Assert.Equal(["map"], SlotStatus.Parse(FreshCard).Features);

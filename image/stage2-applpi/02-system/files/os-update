@@ -33,6 +33,8 @@ WORK = Path("/data/.os-update")
 TRYBOOT_FLAG = Path("/proc/device-tree/chosen/bootloader/tryboot")
 # What the check found on this boot, for status: checking, kept, or failed: <why>
 CHECK_STATE = Path("/run/applpi/os-check")
+# The last trial boot's verdict, kept on the data partition so the slot it goes back to can say why
+LAST_TRIAL = Path("/data/.os-update-last")
 CHECK_SECONDS = 300
 # The root partition of each slot
 SLOTS = {"A": 2, "B": 3}
@@ -95,6 +97,8 @@ def status():
     print(f"permanent={prefix_slot(BOOT / 'config.txt') or ''}")
     print(f"waiting={prefix_slot(BOOT / 'tryboot.txt') or ''}")
     print(f"check={CHECK_STATE.read_text().strip() if CHECK_STATE.exists() else ''}")
+    # "<slot> <kept|failed: why>" from the last trial boot that got as far as its check
+    print(f"last={LAST_TRIAL.read_text().strip() if LAST_TRIAL.exists() else ''}")
     # What this os-update can do, for applpi: write takes a block map
     print("features=map")
     for name in SLOTS:
@@ -318,8 +322,9 @@ def write(block_map=None):
     if any(os.path.realpath(line.split()[0]) == real for line in Path("/proc/mounts").read_text().splitlines()):
         raise UpdateError(f"Slot {target}'s root partition is mounted: not writing it.")
 
-    # Nothing may try the slot while it's being written
+    # Nothing may try the slot while it's being written, and the last trial's verdict is about another image
     (BOOT / "tryboot.txt").unlink(missing_ok=True)
+    LAST_TRIAL.unlink(missing_ok=True)
     shutil.rmtree(WORK, ignore_errors=True)
     WORK.mkdir(mode=0o700)
     mounted = WORK / "image"
@@ -421,19 +426,24 @@ def check():
     if not tried() or prefix_slot(BOOT / "tryboot.txt") != slot or prefix_slot(BOOT / "config.txt") == slot:
         return
 
-    def note(text):
+    def note(text, last=False):
         CHECK_STATE.parent.mkdir(parents=True, exist_ok=True)
         CHECK_STATE.write_text(text + "\n")
+        if last:
+            LAST_TRIAL.write_text(f"{slot} {text}\n")
+            os.sync()
 
     note("checking")
+    # A new trial: the last one's verdict no longer applies
+    LAST_TRIAL.unlink(missing_ok=True)
     say(f"Slot {slot} is on trial: checking it")
     problem = health()
     if problem is None:
         commit()
-        note("kept")
+        note("kept", last=True)
     else:
         permanent = prefix_slot(BOOT / "config.txt")
-        note(f"failed: {problem}")
+        note(f"failed: {problem}", last=True)
         say(f"Slot {slot} isn't healthy ({problem}): restarting into slot {permanent}")
         subprocess.run(["systemctl", "--no-block", "reboot"], check=True)
 
