@@ -147,43 +147,21 @@ stop_qemu() {
 	kill $qemu; wait $qemu 2>/dev/null || true
 }
 
+# The shared checks (checks.sh), into checks-<boot>.log; their FAILED lines go in the summary
 checks() {
-	# Retried: under emulation a connection can still fail now and then
-	local attempt
+	# Retried when SSH fails: under emulation a connection can still fail now and then
+	local attempt log=$work/out/checks-$1.log status
 	for attempt in 1 2 3; do
-		run_checks "$1" && [ -s "$work/out/checks-$1.log" ] && return 0
-		echo "Checks on boot $1 failed (attempt $attempt): $(tail -1 "$work/out/checks-$1.log")" | tee -a "$work/out/summary.log"
+		status=0
+		ssh_pi 'bash -s -- qemu' < /test/checks.sh > "$log" 2>&1 || status=$?
+		if [ "$status" != 255 ] && grep -q "^== Checks" "$log"; then
+			grep "^FAILED" "$log" | tee -a "$work/out/summary.log" || echo "All checks passed" | tee -a "$work/out/summary.log"
+			return 0
+		fi
+		echo "Checks on boot $1 couldn't run (attempt $attempt): $(tail -1 "$log")" | tee -a "$work/out/summary.log"
 		sleep 20
 	done
 	return 1
-}
-
-run_checks() {
-	ssh_pi 'set -x
-		cat /etc/applpi-release; hostname; uptime
-		findmnt -n / ; findmnt -n /media/root-ro ; findmnt -n /data ; findmnt -n /boot/firmware
-		sudo -n /usr/lib/applpi/os-update status
-		grep -c PARTUUID /etc/fstab /media/root-ro/etc/fstab; systemctl is-active boot-firmware.mount
-		ls /boot/firmware /boot/firmware/slotA | grep -vE "\.dtb$"; grep "^os_prefix" /boot/firmware/config.txt
-		lsblk -o NAME,SIZE,FSTYPE,LABEL
-		ls /boot/firmware | grep -iE "applpi(\.json|-error)" || echo "no settings or error file on boot"
-		sudo -n ls -l /data /data/settings /data/ssh
-		ls -l /run/applpi /run/applpi/authorized_keys
-		readlink /etc/localtime; date
-		ls -l /etc/resolv.conf; resolvectl status --no-pager | head -5
-		systemctl --failed --no-legend
-		systemctl list-timers --all --no-legend
-		sudo -n ss -tulpn
-		free -m
-		systemd-analyze
-		systemd-analyze blame | head -12
-		sudo -n journalctl -b -u applpi-data -u applpi-settings --no-pager
-		sudo -n true && echo "sudo works"
-		bash /etc/update-motd.d/00-applpi | sed "s/\x1b\[[0-9;]*m//g" | tail -7
-		grep "OS slot" /etc/issue
-		ls -l /etc/update-motd.d; wc -c < /etc/motd
-		ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost true 2>&1 | tail -1' \
-		> "$work/out/checks-$1.log" 2>&1
 }
 
 "$@"

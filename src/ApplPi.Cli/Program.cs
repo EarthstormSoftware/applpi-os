@@ -20,10 +20,10 @@ static class Program
           applpi setup [name]   Ask for a Pi's settings (name, Wi-Fi, time zone, SSH key) and put them on its card.
                                 Works on a card written with the ApplPi OS image, in this PC's card reader.
                                 The Pi reads them at its next boot, then deletes them from the card.
-          applpi update [name] [image]
+          applpi update [name] [image] [--yes]
                                 Update a Pi's OS over SSH (the image defaults to the newest in deploy\). The new OS
-                                goes into the slot that isn't running, and the Pi restarts into it once; it's kept
-                                if the Pi comes back on it, and otherwise the Pi goes back to the OS it had.
+                                goes into the slot that isn't running, and the Pi restarts into it once; it keeps it
+                                if it starts properly, and otherwise goes back to the OS it had. --yes doesn't ask.
           applpi --version      Show this tool's version.
 
         Settings are remembered in %APPDATA%\ApplPi (Wi-Fi passwords encrypted for your Windows account).
@@ -41,9 +41,7 @@ static class Program
                 ["flash", "--elevated"] => Flash(null, elevated: true),
                 ["flash", var image] => Flash(image, elevated: false),
                 ["flash", var image, "--elevated"] => Flash(image, elevated: true),
-                ["update"] => Update(null, null),
-                ["update", var name] => Update(name, null),
-                ["update", var name, var image] => Update(name, image),
+                ["update", .. var rest] when rest.Count(arg => arg != "--yes") <= 2 => Update(rest),
                 ["--version"] => ShowVersion(),
                 _ => ShowUsage(),
             };
@@ -287,7 +285,14 @@ static class Program
         return 0;
     }
 
-    static int Update(string? name, string? image)
+    /// <summary>applpi update [name] [image] [--yes]</summary>
+    static int Update(string[] args)
+    {
+        var plain = args.Where(arg => arg != "--yes").ToArray();
+        return Update(plain.ElementAtOrDefault(0), plain.ElementAtOrDefault(1), yes: args.Contains("--yes"));
+    }
+
+    static int Update(string? name, string? image, bool yes)
     {
         name = name?.ToLowerInvariant();
         if (name is null)
@@ -330,7 +335,7 @@ static class Program
             {name} runs slot {before.Running}: ApplPi OS {before.Holds(before.Running)}.
             Slot {target} ({before.Holds(target)}) gets {Path.GetFileName(image)}.
             """);
-        var confirm = Ask("Update it? (y/n)", "y", answer => answer is "y" or "n" ? null : "Answer y or n.");
+        var confirm = yes ? "y" : Ask("Update it? (y/n)", "y", answer => answer is "y" or "n" ? null : "Answer y or n.");
         if (confirm != "y")
         {
             Console.WriteLine("Stopped: nothing was changed.");

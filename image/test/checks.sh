@@ -1,0 +1,135 @@
+#!/bin/bash
+# The checks of a running ApplPi OS, run on it as its admin user over SSH, by test-qemu.ps1 (qemu-virt.sh) and
+# test-pi.ps1. Prints what it looked at, then a line per check ("ok      <check>" or "FAILED  <check>: <why>"), and
+# exits 1 if any failed.
+#   checks.sh [qemu]   qemu: QEMU's machine, which has no hardware watchdog, and whose second boot starts the updated
+#                      slot without tryboot (QEMU can't do it)
+mode=${1:-pi}
+
+echo "== Details"
+(
+	set -x
+	cat /etc/applpi-release; hostname; uptime
+	findmnt -n / ; findmnt -n /media/root-ro ; findmnt -n /data ; findmnt -n /boot/firmware
+	sudo -n /usr/lib/applpi/os-update status
+	ls /boot/firmware /boot/firmware/slot? | grep -vE "\.dtb$"; grep "^os_prefix" /boot/firmware/config.txt
+	lsblk -o NAME,SIZE,FSTYPE,LABEL
+	sudo -n ls -l /data /data/settings /data/ssh
+	ls -l /run/applpi /run/applpi/authorized_keys
+	readlink /etc/localtime; date
+	ls -l /etc/resolv.conf; resolvectl status --no-pager | head -5
+	systemctl --failed --no-legend
+	systemctl list-timers --all --no-legend
+	sudo -n ss -tulpn
+	free -m
+	systemd-analyze
+	systemd-analyze blame | head -12
+	systemctl show -p RuntimeWatchdogUSec; cat /sys/class/watchdog/watchdog0/state 2>&1
+	sudo -n journalctl -b -u applpi-data -u applpi-settings -u applpi-os-check --no-pager
+	bash /etc/update-motd.d/00-applpi | sed "s/\x1b\[[0-9;]*m//g" | tail -8
+	grep -A2 "OS slot" /etc/issue
+) 2>&1
+
+# Each check prints why it failed, and returns non-zero
+failed_units() {
+	local state units
+	state=$(systemctl is-system-running)
+	units=$(systemctl --failed --no-legend --plain | awk '{ print $1 }' | xargs)
+	[ "$state" = running ] && [ -z "$units" ] || { echo "the system is $state${units:+; failed: $units}"; return 1; }
+}
+
+# Only SSH (port 22), mDNS (Avahi), the DNS stub on the loopback (resolved) and DHCP (networkd's clients: 68 for
+# IPv4, 546 for IPv6)
+listening() {
+	sudo -n ss -tulpnH | awk '
+		{ match($0, /users:\(\("[^"]+"/); name = substr($0, RSTART + 9, RLENGTH - 10); local = $5 }
+		name == "sshd" && local ~ /:22$/ { next }
+		name == "avahi-daemon" { next }
+		name == "systemd-resolve" && local ~ /^127\.0\.0\.5[34](%lo)?:53$/ { next }
+		name == "systemd-network" && local ~ /:(68|546)$/ { next }
+		{ print name " on " local; bad = 1 }
+		END { exit bad }'
+}
+
+read_only_root() {
+	[ "$(findmnt -n -o FSTYPE /)" = overlay ] || { echo "/ isn't overlayroot's overlay"; return 1; }
+	findmnt -n -o OPTIONS /media/root-ro | tr ',' '\n' | grep -qx ro || { echo "the root isn't mounted read-only"; return 1; }
+}
+
+no_root_login() {
+	local answer
+	answer=$(ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost true 2>&1)
+	[ $? -ne 0 ] && grep -q "Permission denied" <<< "$answer" || { echo "root: $answer"; return 1; }
+}
+
+no_partition_ids() {
+	! grep -H PARTUUID /media/root-ro/etc/fstab /etc/fstab
+}
+
+mounts() {
+	systemctl is-active --quiet boot-firmware.mount || { echo "the boot partition isn't mounted by applpi-boot"; return 1; }
+	findmnt -n /data > /dev/null || { echo "/data isn't mounted"; return 1; }
+}
+
+settings_applied() {
+	! ls /boot/firmware | grep -iE "applpi(\.json|-error\.txt)" || { echo "(left on the boot partition)"; return 1; }
+	[ -s /run/applpi/authorized_keys ] || { echo "no SSH keys in /run/applpi"; return 1; }
+}
+
+slot() {
+	local status running permanent tryboot waiting
+	status=$(sudo -n /usr/lib/applpi/os-update status) || { echo "os-update status failed"; return 1; }
+	running=$(sed -n 's/^running=//p' <<< "$status"); permanent=$(sed -n 's/^permanent=//p' <<< "$status")
+	tryboot=$(sed -n 's/^tryboot=//p' <<< "$status"); waiting=$(sed -n 's/^waiting=//p' <<< "$status")
+	[ "$running" = "$permanent" ] && return 0
+	# QEMU's second boot runs the updated slot as tryboot would, but without the firmware's flag
+	[ "$mode" = qemu ] && [ "$tryboot" = 0 ] && [ "$waiting" = "$running" ] && return 0
+	echo "running slot $running, but the permanent slot is $permanent (tryboot=$tryboot)"
+	return 1
+}
+
+watchdog() {
+	[ "$(systemctl show -p RuntimeWatchdogUSec --value)" = 15s ] || { echo "systemd isn't driving it"; return 1; }
+	[ "$(cat /sys/class/watchdog/watchdog0/state 2>/dev/null)" = active ] || { echo "the hardware watchdog isn't active"; return 1; }
+}
+
+# Nothing that changes the system on a timer: only systemd's own clean-up of temporary files
+timers() {
+	systemctl list-timers --all --no-legend --plain | awk '{ print $NF }' | grep -vx -e systemd-tmpfiles-clean.service \
+		-e '' && return 1 || return 0
+}
+
+login_screens() {
+	grep -q "OS slot" /etc/issue || { echo "the console's text has no slot"; return 1; }
+	bash /etc/update-motd.d/00-applpi | grep -q "OS slot" || { echo "the SSH login screen has no slot"; return 1; }
+}
+
+sudo_works() {
+	sudo -n true
+}
+
+echo
+echo "== Checks"
+result=0
+check() {
+	local why
+	if why=$("$1" 2>&1); then
+		echo "ok      $2"
+	else
+		echo "FAILED  $2: $(tr '\n' ' ' <<< "$why" | sed 's/ *$//')"
+		result=1
+	fi
+}
+check failed_units "no failed units"
+check listening "only SSH, mDNS, the DNS stub and DHCP listening"
+check read_only_root "read-only root"
+check no_root_login "root can't log in"
+check no_partition_ids "no partition IDs in fstab"
+check mounts "boot and data partitions mounted"
+check settings_applied "settings applied, applpi.json gone"
+check slot "running the permanent slot"
+[ "$mode" = qemu ] || check watchdog "hardware watchdog running"
+check timers "no timers that change the system"
+check login_screens "login screens show the slot"
+check sudo_works "sudo works for the admin user"
+exit $result
