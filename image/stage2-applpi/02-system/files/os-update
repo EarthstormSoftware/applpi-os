@@ -322,6 +322,9 @@ def commit():
     shutil.copyfile(BOOT / f"slot{slot}" / "applpi-release.txt", BOOT / "applpi-release.txt")
     (BOOT / "tryboot.txt").unlink()
     os.sync()
+    # The console said the slot was on trial: it says so no longer
+    subprocess.run(["/usr/lib/applpi/slot", "issue"], check=False)
+    subprocess.run(["agetty", "--reload"], check=False)
     say(f"Slot {slot} is now permanent: {release(BOOT / f'slot{slot}')}")
 
 

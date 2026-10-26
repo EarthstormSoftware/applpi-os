@@ -289,9 +289,17 @@ static class Program
 
     static int Update(string? name, string? image)
     {
-        var store = DeviceStore.Load(DeviceStore.DefaultPath);
-        name = Ask("Pi name", name?.ToLowerInvariant() ?? store.LastDevice,
-            answer => SettingsRules.CheckHostname(answer.ToLowerInvariant())).ToLowerInvariant();
+        name = name?.ToLowerInvariant();
+        if (name is null)
+        {
+            name = Ask("Pi name", DeviceStore.Load(DeviceStore.DefaultPath).LastDevice,
+                answer => SettingsRules.CheckHostname(answer.ToLowerInvariant())).ToLowerInvariant();
+        }
+        else if (SettingsRules.CheckHostname(name) is { } problem)
+        {
+            Console.Error.WriteLine(problem);
+            return 1;
+        }
         image = FindImage(image);
         if (image is null)
         {
