@@ -1,0 +1,21 @@
+#!/bin/sh
+# The OS slot running now, for the login screens: "A", or "B (on trial: a restart goes back to A)" when it was started
+# by tryboot and isn't permanent yet. With "issue", writes the console's /etc/issue from its template with the slot.
+set -eu
+
+partition=$(sed -n 's/.*root=PARTUUID=[0-9a-fA-F]\{8\}-\([0-9]\{2\}\).*/\1/p' /proc/cmdline)
+case "$partition" in
+	02) slot=A ;;
+	03) slot=B ;;
+	*) slot=unknown ;;
+esac
+permanent=$(sed -n 's|^os_prefix=slot\([AB]\)/.*|\1|p' /boot/firmware/config.txt 2>/dev/null || true)
+if [ "$slot" != unknown ] && [ -n "$permanent" ] && [ "$permanent" != "$slot" ]; then
+	slot="$slot (on trial: a restart goes back to $permanent)"
+fi
+
+if [ "${1:-}" = issue ]; then
+	sed "s|@SLOT@|${slot}|" /usr/share/applpi/issue > /etc/issue
+else
+	echo "$slot"
+fi

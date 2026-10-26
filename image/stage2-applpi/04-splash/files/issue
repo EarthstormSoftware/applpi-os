@@ -12,5 +12,6 @@
   Name      \n.local
   IPv4      \4
   IPv6      \6
+  OS slot   @SLOT@
   Log in    ssh applpi@\n.local
 

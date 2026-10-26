@@ -11,9 +11,10 @@ info=(
 	"Name      $(hostname).local"
 	"IPv4      ${ipv4:-none}"
 	"IPv6      ${ipv6:-none}"
+	"OS slot   $(/usr/lib/applpi/slot)"
 )
 mapfile -t logo < /usr/share/applpi/logo.ansi
-blank=$(printf '%*s' "$(sed 's/\x1b\[[0-9;]*m//g' <<< "${logo[0]}" | wc -m)" '')
+blank=$(printf '%*s' "$(printf '%s' "${logo[0]}" | sed 's/\x1b\[[0-9;]*m//g' | wc -m)" '')
 
 printf '\e[H\e[2J\n'
 lines=$(( ${#logo[@]} > ${#info[@]} ? ${#logo[@]} : ${#info[@]} ))

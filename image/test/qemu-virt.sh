@@ -179,7 +179,8 @@ run_checks() {
 		systemd-analyze blame | head -12
 		sudo -n journalctl -b -u applpi-data -u applpi-settings --no-pager
 		sudo -n true && echo "sudo works"
-		bash /etc/update-motd.d/00-applpi | sed "s/\x1b\[[0-9;]*m//g" | tail -6
+		bash /etc/update-motd.d/00-applpi | sed "s/\x1b\[[0-9;]*m//g" | tail -7
+		grep "OS slot" /etc/issue
 		ls -l /etc/update-motd.d; wc -c < /etc/motd
 		ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost true 2>&1 | tail -1' \
 		> "$work/out/checks-$1.log" 2>&1
