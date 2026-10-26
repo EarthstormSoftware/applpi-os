@@ -90,11 +90,16 @@ partition straight into the other slot's partition and reads it back to compare 
 partition (as a sparse file on the data partition) just long enough to copy its `slotA/` into the other slot's
 folder, with `root=` in its `cmdline.txt` set for that slot. Then it writes `tryboot.txt`: the new image's
 `config.txt`, starting the new slot. `os-update try` restarts with tryboot, and `applpi` waits for the Pi to answer
-from a new boot (the boot ID changes). If it's running the new slot after a tryboot, `os-update commit` makes it
-permanent: `tryboot.txt` becomes `config.txt`. Until the automatic check and the watchdog (next), answering over SSH
-is the health check, and a Pi that hangs on the new slot needs its power cycling to go back. The running slot is
-never written, and a slot on trial can't be updated until it's kept or left. The firmware isn't updated (only
-flashing changes it). The full QEMU test writes an update and boots the other slot, but QEMU can't do tryboot.
+from a new boot (the boot ID changes). The Pi then decides for itself whether to keep the new slot:
+`applpi-os-check.service` runs `os-update check` at every boot, and on a trial boot it waits (up to 5 minutes) for
+the system to finish starting with no failed units, SSH running and a routable network. Then `os-update commit`
+makes the slot permanent (`tryboot.txt` becomes `config.txt`); otherwise the Pi restarts, which starts the old slot.
+`applpi` shows the verdict (`check=` in `os-update status`). The other ways a trial boot can fail also end in a
+restart into the old slot: a kernel panic or an initramfs that can't mount the root (`panic=10` on the kernel command
+line), a hang (systemd drives the BCM2835 hardware watchdog, 15 s), and emergency or rescue mode (their shells can't
+be used anyway, as root has no password). The running slot is never written, and a slot on trial can't be updated
+until it's kept or left. The firmware isn't updated (only flashing changes it). The full QEMU test writes an update
+and boots the other slot, but QEMU can't do tryboot: the trial boot is checked on the Pi.
 
 Nothing in the root names the image's own partition IDs, because an update puts another image (with other IDs) in
 the other slot. `fstab` only has `/proc`: the initramfs mounts the root named by `root=PARTUUID=` on the kernel

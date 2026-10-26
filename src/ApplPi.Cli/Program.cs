@@ -404,9 +404,55 @@ static class Program
             return 1;
         }
 
-        pi.Run($"{SlotStatus.Command} commit", Message);
+        if (after.Check is null)
+        {
+            // An OS from before the Pi checked its own trial boots: answering over SSH is the check
+            pi.Run($"{SlotStatus.Command} commit", Message);
+        }
+        else
+        {
+            // The Pi decides: it keeps the slot once it has started properly, or restarts into the old one
+            Console.WriteLine($"{name} is up on slot {target}, checking itself (up to 5 minutes).");
+            after = WaitForCheck(pi, after, TimeSpan.FromMinutes(10));
+            if (after?.Permanent != target)
+            {
+                Console.Error.WriteLine(after?.Check is { } check && check.StartsWith("failed", StringComparison.Ordinal)
+                    ? $"{name} didn't keep slot {target} ({check[7..].Trim()}): it's going back to slot {before.Running}."
+                    : $"{name} didn't keep slot {target}: it goes back to slot {before.Running} at its next restart.");
+                return 1;
+            }
+        }
         Console.WriteLine($"Done: {name} runs ApplPi OS {after.Holds(target)} from slot {target}.");
         return 0;
+    }
+
+    /// <summary>
+    /// Waits for the Pi's check of its trial boot: returns its slots once the slot is kept or the check failed, from
+    /// its next boot if it restarted meanwhile, or as last seen when time runs out.
+    /// </summary>
+    static SlotStatus? WaitForCheck(PiShell pi, SlotStatus trial, TimeSpan limit)
+    {
+        var deadline = DateTime.UtcNow + limit;
+        var status = trial;
+        while (status.Permanent != status.Running && status.Check?.StartsWith("failed", StringComparison.Ordinal) != true
+            && DateTime.UtcNow < deadline)
+        {
+            Thread.Sleep(TimeSpan.FromSeconds(10));
+            try
+            {
+                var now = SlotStatus.Parse(pi.Run($"{SlotStatus.Command} status", connectTimeoutSeconds: 10));
+                if (now.Boot != trial.Boot)
+                {
+                    return now;
+                }
+                status = now;
+            }
+            catch (PiCommandException error) when (error.Unreachable)
+            {
+                // Restarting into the old slot, or the network dropped for a moment: its next answer says which
+            }
+        }
+        return status;
     }
 
     /// <summary>

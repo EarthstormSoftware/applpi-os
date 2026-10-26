@@ -6,9 +6,13 @@
                      its root partition (checked by reading it back) and its boot files, then tryboot.txt
   os-update try      restarts into the written slot, for one boot (the firmware's tryboot)
   os-update commit   makes the running slot permanent (config.txt), after a tryboot into it
+  os-update check    at every boot (applpi-os-check.service): on a trial boot, commits the slot once the system has
+                     started with no failed units, SSH and the network, or restarts into the permanent slot
+  os-update fallback in emergency or rescue mode: on a trial boot, restarts into the permanent slot
 
 The running slot is never written, and config.txt only changes on commit, so any failure, power cut or hang before
-then leaves the Pi starting the OS it had.
+then leaves the Pi starting the OS it had (a hang by way of the hardware watchdog, a kernel or initramfs failure by
+way of panic= on the kernel command line).
 """
 
 import hashlib
@@ -18,11 +22,15 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 BOOT = Path("/boot/firmware")
 WORK = Path("/data/.os-update")
 TRYBOOT_FLAG = Path("/proc/device-tree/chosen/bootloader/tryboot")
+# What the check found on this boot, for status: checking, kept, or failed: <why>
+CHECK_STATE = Path("/run/applpi/os-check")
+CHECK_SECONDS = 300
 # The root partition of each slot
 SLOTS = {"A": 2, "B": 3}
 CHUNK = 4 << 20
@@ -83,6 +91,7 @@ def status():
     print(f"tryboot={int(tried())}")
     print(f"permanent={prefix_slot(BOOT / 'config.txt') or ''}")
     print(f"waiting={prefix_slot(BOOT / 'tryboot.txt') or ''}")
+    print(f"check={CHECK_STATE.read_text().strip() if CHECK_STATE.exists() else ''}")
     for name in SLOTS:
         print(f"slot{name}={release(BOOT / f'slot{name}')}")
 
@@ -328,8 +337,64 @@ def commit():
     say(f"Slot {slot} is now permanent: {release(BOOT / f'slot{slot}')}")
 
 
+def systemctl(*args):
+    return subprocess.run(["systemctl", *args], capture_output=True, text=True)
+
+
+def health():
+    """None if this boot is healthy within CHECK_SECONDS: started with no failed units, SSH running and a routable
+    network (updates come over it). Otherwise why not."""
+    deadline = time.monotonic() + CHECK_SECONDS
+    while (state := systemctl("is-system-running").stdout.strip()) in ("initializing", "starting"):
+        if time.monotonic() > deadline:
+            return "it didn't finish starting"
+        time.sleep(5)
+    if state != "running":
+        failed = [line.split()[0] for line in systemctl("--failed", "--no-legend", "--plain").stdout.splitlines() if line]
+        return f"failed units: {', '.join(failed)}" if failed else f"the system is {state}"
+    if systemctl("is-active", "--quiet", "ssh.service").returncode != 0:
+        return "SSH isn't running"
+    remaining = max(10, int(deadline - time.monotonic()))
+    online = subprocess.run(["/usr/lib/systemd/systemd-networkd-wait-online", "--any", f"--timeout={remaining}"],
+                            capture_output=True)
+    if online.returncode != 0:
+        return "no network"
+    return None
+
+
+def check():
+    _, slot = running()
+    if not tried() or prefix_slot(BOOT / "tryboot.txt") != slot or prefix_slot(BOOT / "config.txt") == slot:
+        return
+
+    def note(text):
+        CHECK_STATE.parent.mkdir(parents=True, exist_ok=True)
+        CHECK_STATE.write_text(text + "\n")
+
+    note("checking")
+    say(f"Slot {slot} is on trial: checking it")
+    problem = health()
+    if problem is None:
+        commit()
+        note("kept")
+    else:
+        permanent = prefix_slot(BOOT / "config.txt")
+        note(f"failed: {problem}")
+        say(f"Slot {slot} isn't healthy ({problem}): restarting into slot {permanent}")
+        subprocess.run(["systemctl", "--no-block", "reboot"], check=True)
+
+
+def fallback():
+    """Emergency or rescue mode on a trial boot: back to the permanent slot. (The boot partition may not be mounted
+    here, so the firmware's flag decides: a restart after any tryboot starts config.txt's slot.)"""
+    if tried():
+        say("The trial boot failed: restarting into the permanent slot")
+        subprocess.run(["systemctl", "--no-block", "reboot"], check=True)
+
+
 def main():
-    commands = {"status": status, "write": write, "try": try_slot, "commit": commit}
+    commands = {"status": status, "write": write, "try": try_slot, "commit": commit, "check": check,
+                "fallback": fallback}
     if len(sys.argv) != 2 or sys.argv[1] not in commands:
         print(__doc__, file=sys.stderr)
         return 2

@@ -10,6 +10,7 @@ public class SlotStatusTests
         tryboot=0
         permanent=A
         waiting=
+        check=
         slotA=v0.1.2 (build 20261025-1012)
         slotB=
         """;
@@ -23,6 +24,7 @@ public class SlotStatusTests
         Assert.False(status.Tryboot);
         Assert.Equal("A", status.Permanent);
         Assert.Equal("", status.Waiting);
+        Assert.Equal("", status.Check);
         Assert.Equal("B", status.Other);
         Assert.Equal("v0.1.2 (build 20261025-1012)", status.Holds("A"));
         Assert.Equal("nothing yet", status.Holds("B"));
@@ -37,6 +39,14 @@ public class SlotStatusTests
         Assert.Equal("B", status.Running);
         Assert.Equal("A", status.Other);
         Assert.Equal("B", status.Waiting);
+    }
+
+    [Fact]
+    public void ReadsTheChecksVerdict()
+    {
+        Assert.Equal("failed: no network", SlotStatus.Parse(FreshCard.Replace("check=", "check=failed: no network")).Check);
+        // An OS from before the Pi checked its trial boots doesn't say
+        Assert.Null(SlotStatus.Parse(FreshCard.Replace("check=\n", "")).Check);
     }
 
     [Fact]

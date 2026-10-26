@@ -1,0 +1,12 @@
+[Unit]
+Description=ApplPi OS update check: keeps a slot on trial once it has started properly
+# Once the boot's other jobs are queued; Type=simple, so this doesn't hold up the system reaching "running", which
+# the check waits for
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/applpi/os-update check
+
+[Install]
+WantedBy=multi-user.target

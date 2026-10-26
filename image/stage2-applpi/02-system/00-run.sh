@@ -11,8 +11,9 @@ chmod 644 "${ROOTFS_DIR}/etc/applpi-release"
 install -m 644 "${ROOTFS_DIR}/etc/applpi-release" "${ROOTFS_DIR}/boot/firmware/applpi-release.txt"
 
 # Read-only root, with changes kept in RAM (overlayroot, as raspi-config's overlay file system), and no resize: the
-# card is laid out on first boot by applpi-data.service
-sed -i 's/ resize//; s/^/overlayroot=tmpfs /' "${ROOTFS_DIR}/boot/firmware/cmdline.txt"
+# card is laid out on first boot by applpi-data.service. A kernel panic, or an initramfs that can't mount the root,
+# restarts the Pi after 10 s instead of stopping (after an OS update's trial boot, that starts the permanent slot).
+sed -i 's/ resize//; s/^/overlayroot=tmpfs panic=10 /' "${ROOTFS_DIR}/boot/firmware/cmdline.txt"
 install -d "${ROOTFS_DIR}/etc/systemd/system/systemd-remount-fs.service.d"
 install -m 644 files/remount-fs.conf "${ROOTFS_DIR}/etc/systemd/system/systemd-remount-fs.service.d/applpi.conf"
 
@@ -29,6 +30,16 @@ install -d "${ROOTFS_DIR}/data"
 install -d "${ROOTFS_DIR}/usr/lib/applpi"
 install -m 755 files/mount-data files/apply-settings files/os-update "${ROOTFS_DIR}/usr/lib/applpi/"
 install -m 644 files/applpi-data.service files/applpi-settings.service "${ROOTFS_DIR}/etc/systemd/system/"
+
+# OS updates: a trial boot is kept once it's healthy, and otherwise (including a hang, by the hardware watchdog, or
+# emergency mode) the Pi restarts into the permanent slot
+install -m 644 files/applpi-os-check.service "${ROOTFS_DIR}/etc/systemd/system/"
+install -d "${ROOTFS_DIR}/etc/systemd/system.conf.d"
+install -m 644 files/watchdog.conf "${ROOTFS_DIR}/etc/systemd/system.conf.d/applpi-watchdog.conf"
+for unit in emergency rescue; do
+	install -d "${ROOTFS_DIR}/etc/systemd/system/${unit}.service.d"
+	install -m 644 files/emergency.conf "${ROOTFS_DIR}/etc/systemd/system/${unit}.service.d/applpi.conf"
+done
 
 # Logs in RAM
 install -d "${ROOTFS_DIR}/etc/systemd/journald.conf.d"
@@ -52,7 +63,7 @@ install -m 440 files/sudoers "${ROOTFS_DIR}/etc/sudoers.d/010_applpi-nopasswd"
 on_chroot <<- EOF
 	usermod --pass='*' root
 	usermod --pass='*' --shell /bin/bash -aG sudo,adm,video ${FIRST_USER_NAME}
-	systemctl enable applpi-data.service applpi-settings.service systemd-networkd.service wpa_supplicant@wlan0.service ssh.service avahi-daemon.service
+	systemctl enable applpi-data.service applpi-settings.service applpi-os-check.service systemd-networkd.service wpa_supplicant@wlan0.service ssh.service avahi-daemon.service
 	systemctl disable wpa_supplicant.service
 	# Its host keys would be made at every boot (each boot of a read-only root is a "first boot"): ours are on /data
 	systemctl mask sshd-keygen.service

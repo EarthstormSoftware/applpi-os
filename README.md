@@ -41,9 +41,10 @@ dotnet run --project src\ApplPi.Cli -- update <name>
 ```
 
 It sends the newest image in `deploy\` (or the one named after the Pi's name) to the Pi, which writes it into its
-other OS slot and checks it, while the running OS carries on. Then the Pi restarts into the new OS once; if it comes
-back on it, `applpi` keeps it. If it doesn't (power it off and on if it's stuck), it goes back to the OS it had. Apps,
-settings and the host key are on the data partition, so they stay as they were.
+other OS slot and checks it, while the running OS carries on. Then the Pi restarts into the new OS once, and keeps it
+if it starts properly (no failed services, SSH and the network up, within 5 minutes). If it doesn't (or it hangs,
+which the hardware watchdog catches), it restarts into the OS it had. Apps, settings and the host key are on the data
+partition, so they stay as they were. Both login screens show which OS slot is running, and when it's on trial.
 
 With a monitor connected, the Pi shows the ApplPi OS logo while it boots, then its name, addresses, image version and
 build time; an SSH login opens with the same information beside the apple. The screen blanks after 5 minutes without
