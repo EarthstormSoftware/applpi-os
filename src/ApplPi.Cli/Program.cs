@@ -353,9 +353,18 @@ static class Program
         {
             pi.Run($"{SlotStatus.Command} write", image, new ConsoleProgress<long>(sent =>
             {
-                var line = $"\rSent {(double)sent / size:P0} of the image ({sent / (1 << 20)} of {size / (1 << 20)} MiB)   ";
                 lock (console)
                 {
+                    if (sent == size)
+                    {
+                        // Once it's all sent, the Pi's messages carry on without the progress line under them
+                        Console.WriteLine($"\rSent all {size / (1 << 20)} MiB of the image: the Pi is still writing and checking it."
+                            .PadRight(progressLine.Length + 1));
+                        progressLine = "";
+                        return;
+                    }
+                    var line = $"\rSent {(double)sent / size:P0} of the compressed image ({sent / (1 << 20)} of " +
+                        $"{size / (1 << 20)} MiB)   ";
                     if (line != progressLine)
                     {
                         Console.Write(line);
@@ -370,11 +379,6 @@ static class Program
             Console.Error.WriteLine($"The update wasn't written: {error.Message} {name} still runs slot {before.Running}, " +
                 "unchanged.");
             return 1;
-        }
-        lock (console)
-        {
-            progressLine = "";
-            Console.WriteLine();
         }
 
         Console.WriteLine($"Restarting {name} into slot {target}, once. If it doesn't come back on it, it goes back to " +

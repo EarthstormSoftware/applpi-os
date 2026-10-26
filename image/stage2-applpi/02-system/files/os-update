@@ -175,6 +175,8 @@ def unpack(source, boot_image, root_device):
     (boot_start, boot_length), (root_start, root_length) = partitions(mbr)
     if root_length > size_of(root_device):
         raise UpdateError(f"The image's root ({root_length >> 20} MiB) is bigger than the slot's partition.")
+    say(f"Unpacking the image as it arrives: its {root_length >> 20} MiB root partition (empty space included) goes "
+        f"straight into the slot's partition")
 
     reader.skip_to(boot_start)
     with open(boot_image, "wb") as file:
