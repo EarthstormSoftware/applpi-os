@@ -196,6 +196,11 @@ The `applpi-app` service, the app manifest and the app's place on the data parti
 its own repo: a Microdot page in the Pico style with `/api/info`, and a `deploy.ps1`. `checks.sh` checks the app
 runs and answers on port 80, so `test-pi.ps1` covers it. Released as v0.3.0.
 
+- Done (v0.3.0): one app per Pi, as above, with [ApplPi Hello](https://github.com/EarthstormSoftware/applpi-hello)
+  as the example. Checked on the Pi 2: deploying, a crash (restarted), a bad manifest (refused, the old app kept), an
+  app that won't start (reported with its output), removing, and two OS updates with the app running (kept, its
+  settings too, the trial boot waiting for it). Not yet checked: an OS update that stops the app.
+
 ### 4. OS updates
 
 The A/B slots, the update command and the automatic switch back. Check it by updating to a deliberately broken
