@@ -110,10 +110,21 @@ from the card's disk ID and the slot's partition (`-02` for A, `-03` for B).
 
 ### Apps
 
-- Each app is its own repo. It deploys to `/data/apps/<name>` over SSH with a `deploy.ps1`, like the Pico
-  firmware's, and is run by a shared systemd service (`applpi-app@<name>`) that restarts it if it stops.
-- A small manifest per app: name, port, whether it needs root (`rpi_ws281x` does), and hardware groups.
-- Apps are plain Python. Pure-Python dependencies go with the app; compiled ones belong in the OS image.
+- One app per Pi, like a Pico: a Pi does one job, and a second job means another Pi. Deploying a different app
+  replaces the one that was there. (Several apps would need a port each, sharing of GPIO pins and the LED driver,
+  and a deploy tool that lists and removes apps. If it's ever needed, the service becomes one per app.)
+- Each app is its own repo. Its `deploy.ps1`, like the Pico firmware's, copies it over SSH to `/data/app` and
+  restarts it. The app starts at `main.py`, as on a Pico, with its pure-Python libraries (Microdot among them) in
+  `lib/`. Compiled libraries belong in the OS image.
+- It runs as one systemd service, `applpi-app`, which restarts it if it stops. With no app in `/data/app`, the
+  service doesn't start.
+- The app's web page is on port 80, as on the Pico, so it's at `http://<name>.local`. systemd gives the app the
+  right to use port 80 without it being root.
+- A small manifest, `app.json`: name, version, whether it needs root (`rpi_ws281x` does) and the hardware it uses
+  (GPIO, I2C, SPI), which become the groups it runs with. Otherwise it runs as its own user, not `applpi`.
+- The root filesystem is read-only, so the app keeps its settings and anything else it writes in `/data/app-state`,
+  which a deploy leaves alone.
+- Both login screens show the app's name, version and whether it's running, beside the slot and last update.
 - Web UI as on the Pico devices: [Microdot](https://github.com/miguelgrinberg/microdot) (it runs on CPython
   too), the same tabs, `/api/info` for health, a JSON API, optional web password, POSTs from other sites refused.
   The Wi-Fi setup hotspot, watchdog and Wi-Fi update code aren't needed: Wi-Fi is set at flashing, systemd restarts
@@ -174,8 +185,9 @@ copied onto the boot partition by hand. The GitHub Actions workflow comes once t
 
 ### 3. Apps
 
-The data partition, the `applpi-app@` service and the app manifest, proved with a "hello" app: a Microdot page in
-the Pico style and a `deploy.ps1`.
+The `applpi-app` service, the app manifest and the app's place on the data partition, proved with a "hello" app in
+its own repo: a Microdot page in the Pico style with `/api/info`, and a `deploy.ps1`. `checks.sh` checks the app
+runs and answers on port 80, so `test-pi.ps1` covers it. Released as v0.3.0.
 
 ### 4. OS updates
 
