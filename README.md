@@ -12,8 +12,9 @@ as a Pico W, with Python, the network, USB and GPIO.
 - **No serial cable or screen needed:** the card is flashed from Windows with the Pi's name, Wi-Fi and SSH key, so it
   comes up on the network ready for SSH.
 
-> **Status:** v0.1.1 runs on the Pi 2 and is set up with `applpi flash`. Next: OS updates over SSH (A/B slots). See
-> the [roadmap](docs/roadmap.md) for the design and the steps.
+> **Status:** v0.2.0 runs on the Pi 2: set up with `applpi flash`, and updated over SSH with `applpi update` (A/B
+> slots, going back by itself if a new OS doesn't start properly). Next: apps. See the [roadmap](docs/roadmap.md)
+> for the design and the steps.
 
 ## Setting up a Pi
 
@@ -64,10 +65,15 @@ The image (`applpi-os-<version>.img.xz`, with its `.bmap` and package list) ends
 from the latest git tag (`v0.1.0`, or `v0.1.0-3-g1ad84dc-dirty` between releases) and is recorded with its build
 time in `/etc/applpi-release` on the Pi and `applpi-release.txt` on the card.
 
+To test it on a Pi that already runs ApplPi OS, `.\image\test\test-pi.ps1 [name]` updates the Pi to the newest image
+and checks it over SSH (no failed services, nothing else listening, the read-only root, the slot, the watchdog and
+more), in about 7 minutes. The log goes in `deploy\test-pi\`.
+
 To test it without a Pi, `.\image\test\test-qemu.ps1` boots it in QEMU (generic ARM machine and kernel, so not the
-Pi's kernel, firmware or Wi-Fi) and checks first boot, the settings, SSH and the read-only root. The full test (use
-for releases) then updates the card to the same image and boots the other slot; `-Quick` boots once, in about 20
-minutes. The results go in `deploy\test\`.
+Pi's kernel, firmware or Wi-Fi) and runs the same checks, and also tests the first boot: laying out the card and
+reading `applpi.json`. The full test (use for releases) then updates the card to the same image and boots the other
+slot; `-Quick` boots once, in about 20 minutes. The results go in `deploy\test\`. To check that a failed update goes
+back, `.\image\test\broken-image.ps1` makes a copy of an image with a service that always fails.
 
 ## Licence
 

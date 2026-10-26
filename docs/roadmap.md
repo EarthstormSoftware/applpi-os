@@ -182,6 +182,14 @@ the Pico style and a `deploy.ps1`.
 The A/B slots, the update command and the automatic switch back. Check it by updating to a deliberately broken
 image.
 
+- Done (v0.2.0): the slots, `applpi update` and `os-update` (writing only the root's blocks that hold data, checked
+  by reading back and `e2fsck`), the Pi's own check of a trial boot, the watchdog and `panic=10`, and both login
+  screens showing the slot and the last update. Checked on the Pi 2: updates both ways, and an update to an image
+  with a failing service (`image\test\broken-image.ps1`) going back by itself, with the reason shown. Not yet
+  checked on the Pi: a hang or a kernel panic during a trial boot.
+- Testing: `image\test\test-pi.ps1` updates the test Pi and runs the checks (`image\test\checks.sh`) on it, in
+  about 7 minutes; the QEMU test, with the same checks, stays for what only a first boot does and for releases.
+
 ### 5. Flash app
 
 The WinUI flashing app.
