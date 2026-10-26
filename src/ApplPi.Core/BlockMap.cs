@@ -48,6 +48,10 @@ public sealed class BlockMap
         return new BlockMap(ranges, imageSize);
     }
 
+    /// <summary>The ranges as os-update write takes them: "start-end,..." in bytes, end exclusive.</summary>
+    public string ToArgument() => string.Join(',', ranges.Select(range =>
+        string.Create(CultureInfo.InvariantCulture, $"{range.Start}-{range.End}")));
+
     /// <summary>
     /// The parts of the image between offset and offset + length that hold data, as (start, length) relative to
     /// offset. Block-aligned, since the ranges are whole blocks.

@@ -349,9 +349,12 @@ static class Program
                 Console.Write(progressLine);
             }
         }
+        // With the image's block map, the Pi writes only the parts of the root that hold data
+        var map = before.Features.Contains("map") ? BlockMap.ForImage(image) : null;
+        var write = $"{SlotStatus.Command} write{(map is null ? "" : $" --map={map.ToArgument()}")}";
         try
         {
-            pi.Run($"{SlotStatus.Command} write", image, new ConsoleProgress<long>(sent =>
+            pi.Run(write, image, new ConsoleProgress<long>(sent =>
             {
                 lock (console)
                 {

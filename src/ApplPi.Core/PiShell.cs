@@ -105,10 +105,11 @@ public sealed class PiCommandException(int exitCode, string message) : InvalidOp
 /// What os-update status reports: the slots, which is running, permanent and waiting to be tried, the boot's ID (new
 /// at each start, so a restart can be told from a Pi that hasn't gone down yet) and what the Pi's own check of a trial
 /// boot found: "" (no trial), "checking", "kept" or "failed: why". Check is null from an OS from before the check,
-/// which leaves keeping the slot to applpi.
+/// which leaves keeping the slot to applpi. Features lists what the running os-update can do ("map": write takes the
+/// image's block map).
 /// </summary>
 public sealed record SlotStatus(string Boot, string Running, bool Tryboot, string Permanent, string Waiting, string SlotA,
-    string SlotB, string? Check)
+    string SlotB, string? Check, IReadOnlyList<string> Features)
 {
     public const string Command = "sudo -n /usr/lib/applpi/os-update";
 
@@ -126,6 +127,7 @@ public sealed record SlotStatus(string Boot, string Running, bool Tryboot, strin
         string Value(string key) => values.TryGetValue(key, out var value) ? value
             : throw new InvalidOperationException($"os-update status didn't say {key}.");
         return new SlotStatus(Value("boot"), Value("running"), Value("tryboot") == "1", Value("permanent"), Value("waiting"),
-            Value("slotA"), Value("slotB"), values.GetValueOrDefault("check"));
+            Value("slotA"), Value("slotB"), values.GetValueOrDefault("check"),
+            values.GetValueOrDefault("features", "").Split(',', StringSplitOptions.RemoveEmptyEntries));
     }
 }

@@ -11,6 +11,7 @@ public class SlotStatusTests
         permanent=A
         waiting=
         check=
+        features=map
         slotA=v0.1.2 (build 20261025-1012)
         slotB=
         """;
@@ -47,6 +48,29 @@ public class SlotStatusTests
         Assert.Equal("failed: no network", SlotStatus.Parse(FreshCard.Replace("check=", "check=failed: no network")).Check);
         // An OS from before the Pi checked its trial boots doesn't say
         Assert.Null(SlotStatus.Parse(FreshCard.Replace("check=\n", "")).Check);
+    }
+
+    [Fact]
+    public void ReadsWhatThePiCanDo()
+    {
+        Assert.Equal(["map"], SlotStatus.Parse(FreshCard).Features);
+        Assert.Empty(SlotStatus.Parse(FreshCard.Replace("features=map\n", "")).Features);
+    }
+
+    [Fact]
+    public void BlockMapGoesToThePiAsByteRanges()
+    {
+        var map = BlockMap.Parse("""
+            <bmap version="2.0">
+              <ImageSize>1048576</ImageSize>
+              <BlockSize>4096</BlockSize>
+              <BlockMap>
+                <Range chksum="aa">100-101</Range>
+                <Range chksum="bb">0</Range>
+              </BlockMap>
+            </bmap>
+            """);
+        Assert.Equal("0-4096,409600-417792", map.ToArgument());
     }
 
     [Fact]

@@ -2,8 +2,11 @@
 """ApplPi OS updates (A/B slots). Run as root; applpi update on Windows runs these over SSH.
 
   os-update status   which slot is running, which is permanent, which is waiting to be tried, and what each holds
-  os-update write    reads an ApplPi OS image (.img.xz) on stdin and writes it into the slot that isn't running:
-                     its root partition (checked by reading it back) and its boot files, then tryboot.txt
+  os-update write [--map=<start>-<end>,...]
+                     reads an ApplPi OS image (.img.xz) on stdin and writes it into the slot that isn't running:
+                     its root partition (checked by reading it back, and with e2fsck) and its boot files, then
+                     tryboot.txt. With the image's block map (byte ranges from its .bmap, end exclusive), only the
+                     root's parts that hold data are written.
   os-update try      restarts into the written slot, for one boot (the firmware's tryboot)
   os-update commit   makes the running slot permanent (config.txt), after a tryboot into it
   os-update check    at every boot (applpi-os-check.service): on a trial boot, commits the slot once the system has
@@ -92,6 +95,8 @@ def status():
     print(f"permanent={prefix_slot(BOOT / 'config.txt') or ''}")
     print(f"waiting={prefix_slot(BOOT / 'tryboot.txt') or ''}")
     print(f"check={CHECK_STATE.read_text().strip() if CHECK_STATE.exists() else ''}")
+    # What this os-update can do, for applpi: write takes a block map
+    print("features=map")
     for name in SLOTS:
         print(f"slot{name}={release(BOOT / f'slot{name}')}")
 
@@ -167,16 +172,47 @@ def drop_caches():
     Path("/proc/sys/vm/drop_caches").write_text("3\n")
 
 
-def unpack(source, boot_image, root_device):
-    """Writes the image's boot partition to a (sparse) file and its root partition to the slot's partition. Returns
-    the root's length and SHA-256."""
+def parse_map(text):
+    """The image's block map as sorted (start, end) byte ranges: "start-end,..." (end exclusive), from the .bmap that
+    applpi sends with the image."""
+    try:
+        ranges = sorted((int(start), int(end)) for start, end in (item.split("-") for item in text.split(",")))
+    except ValueError:
+        raise UpdateError(f"That isn't a block map: {text[:40]}") from None
+    if any(start >= end or start % 512 or end % 512 for start, end in ranges):
+        raise UpdateError("The block map's ranges aren't whole sectors.")
+    return ranges
+
+
+def within(ranges, start, end):
+    """The parts of [start, end) that the ranges cover."""
+    for range_start, range_end in ranges:
+        if range_end > start and range_start < end:
+            yield max(range_start, start), min(range_end, end)
+
+
+def unpack(source, boot_image, root_device, block_map=None):
+    """Writes the image's boot partition to a (sparse) file and its root partition to the slot's partition: only the
+    parts the block map lists, if there is one (the rest is the file system's free space, whose contents don't
+    matter). Returns the parts written, as (offset, length) in the partition, and their SHA-256."""
     reader = Reader(decompressed(source))
     mbr = b"".join(bytes(part) for part in reader.read(512))
     (boot_start, boot_length), (root_start, root_length) = partitions(mbr)
     if root_length > size_of(root_device):
         raise UpdateError(f"The image's root ({root_length >> 20} MiB) is bigger than the slot's partition.")
-    say(f"Unpacking the image as it arrives: its {root_length >> 20} MiB root partition (empty space included) goes "
-        f"straight into the slot's partition")
+    root_map = None
+    if block_map is not None:
+        root_map = [(start - root_start, end - root_start)
+                    for start, end in within(block_map, root_start, root_start + root_length)]
+        if not root_map:
+            raise UpdateError("The block map lists nothing in the image's root: it's for another image.")
+    if root_map:
+        mapped = sum(end - start for start, end in root_map)
+        say(f"Unpacking the image as it arrives: the {mapped >> 20} MiB of its {root_length >> 20} MiB root partition "
+            f"that hold data go straight into the slot's partition (the rest is empty space)")
+    else:
+        say(f"Unpacking the image as it arrives: its {root_length >> 20} MiB root partition (empty space included) "
+            f"goes straight into the slot's partition")
 
     reader.skip_to(boot_start)
     with open(boot_image, "wb") as file:
@@ -192,36 +228,52 @@ def unpack(source, boot_image, root_device):
 
     reader.skip_to(root_start)
     digest = hashlib.sha256()
-    written = 0
+    parts = []
+    position = 0
     shown = 0
     with open(root_device, "r+b", buffering=0) as device:
         for part in reader.read(root_length):
-            digest.update(part)
-            written += len(part)
-            while part:
-                part = part[device.write(part):]
-            if written - shown >= 256 << 20:
-                shown = written
-                say(f"  {written >> 20} of {root_length >> 20} MiB written")
+            pieces = within(root_map, position, position + len(part)) if root_map else [(position, position + len(part))]
+            for start, end in pieces:
+                data = part[start - position:end - position]
+                digest.update(data)
+                device.seek(start)
+                while data:
+                    data = data[device.write(data):]
+                # Next to the last part written: one longer part
+                if parts and parts[-1][0] + parts[-1][1] == start:
+                    parts[-1] = (parts[-1][0], parts[-1][1] + end - start)
+                else:
+                    parts.append((start, end - start))
+            position += len(part)
+            if position - shown >= 256 << 20:
+                shown = position
+                say(f"  {position >> 20} of {root_length >> 20} MiB done")
         os.fsync(device.fileno())
     # The rest of the stream, to its end, so its checksum is checked
     for _ in reader.chunks:
         pass
-    return root_length, digest.hexdigest()
+    return parts, digest.hexdigest()
 
 
-def check_root(root_device, length, expected):
+def check_root(root_device, parts, expected):
+    """Reads back what was written, compares its checksum, and checks the file system."""
     digest = hashlib.sha256()
     with open(root_device, "rb", buffering=0) as device:
-        remaining = length
-        while remaining > 0:
-            data = device.read(min(CHUNK, remaining))
-            if not data:
-                break
-            digest.update(data)
-            remaining -= len(data)
-    if remaining or digest.hexdigest() != expected:
+        for start, length in parts:
+            device.seek(start)
+            while length > 0:
+                data = device.read(min(CHUNK, length))
+                if not data:
+                    raise UpdateError("The slot's partition is shorter than what was written to it.")
+                digest.update(data)
+                length -= len(data)
+    if digest.hexdigest() != expected:
         raise UpdateError("The slot's partition doesn't read back as written: the card may be failing.")
+    fsck = subprocess.run(["e2fsck", "-fn", str(root_device)], capture_output=True, text=True)
+    if fsck.returncode != 0:
+        last = (fsck.stdout.strip().splitlines() or ["?"])[-1]
+        raise UpdateError(f"The new root's file system has errors (e2fsck: {last}).")
 
 
 def file_hash(path):
@@ -253,7 +305,7 @@ def replace_file(path, text):
     os.sync()
 
 
-def write():
+def write(block_map=None):
     disk, slot = running()
     if prefix_slot(BOOT / "config.txt") != slot:
         raise UpdateError(f"Slot {slot} is running on trial: run 'os-update commit' to keep it (or restart to go "
@@ -273,10 +325,10 @@ def write():
     mounted = WORK / "image"
     try:
         say(f"Writing the new OS into slot {target} (slot {slot} is running)")
-        root_length, root_hash = unpack(sys.stdin.buffer, WORK / "boot.img", root_device)
+        parts, root_hash = unpack(sys.stdin.buffer, WORK / "boot.img", root_device, block_map)
         say("Checking the root partition")
         drop_caches()
-        check_root(root_device, root_length, root_hash)
+        check_root(root_device, parts, root_hash)
 
         mounted.mkdir()
         subprocess.run(["mount", "-o", "loop,ro", str(WORK / "boot.img"), str(mounted)], check=True)
@@ -397,14 +449,19 @@ def fallback():
 def main():
     commands = {"status": status, "write": write, "try": try_slot, "commit": commit, "check": check,
                 "fallback": fallback}
-    if len(sys.argv) != 2 or sys.argv[1] not in commands:
+    args = sys.argv[1:]
+    map_arg = next((arg for arg in args[1:] if arg.startswith("--map=")), None)
+    if not args or args[0] not in commands or len(args) > (2 if args[0] == "write" and map_arg else 1):
         print(__doc__, file=sys.stderr)
         return 2
     if os.geteuid() != 0:
         print("os-update runs as root: sudo os-update ...", file=sys.stderr)
         return 1
     try:
-        commands[sys.argv[1]]()
+        if map_arg:
+            write(parse_map(map_arg[len("--map="):]))
+        else:
+            commands[args[0]]()
     except UpdateError as error:
         say(str(error))
         return 1
