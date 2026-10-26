@@ -41,6 +41,13 @@ for unit in emergency rescue; do
 	install -m 644 files/emergency.conf "${ROOTFS_DIR}/etc/systemd/system/${unit}.service.d/applpi.conf"
 done
 
+# The app (one per Pi, in /data/app), run by applpi-app.service as the app user, which can use the hardware: GPIO,
+# I2C and SPI by the udev rules, the display, touch and serial ports by Debian's groups. The user's ID is fixed, as
+# /data/app-state is the app's and outlasts OS updates (Debian gives out system IDs from 999 down).
+install -m 755 files/app "${ROOTFS_DIR}/usr/lib/applpi/"
+install -m 644 files/applpi-app.service "${ROOTFS_DIR}/etc/systemd/system/"
+install -m 644 files/99-applpi-hardware.rules "${ROOTFS_DIR}/etc/udev/rules.d/"
+
 # Logs in RAM
 install -d "${ROOTFS_DIR}/etc/systemd/journald.conf.d"
 install -m 644 files/journald.conf "${ROOTFS_DIR}/etc/systemd/journald.conf.d/applpi.conf"
@@ -63,7 +70,11 @@ install -m 440 files/sudoers "${ROOTFS_DIR}/etc/sudoers.d/010_applpi-nopasswd"
 on_chroot <<- EOF
 	usermod --pass='*' root
 	usermod --pass='*' --shell /bin/bash -aG sudo,adm,video ${FIRST_USER_NAME}
-	systemctl enable applpi-data.service applpi-settings.service applpi-os-check.service systemd-networkd.service wpa_supplicant@wlan0.service ssh.service avahi-daemon.service
+	for group in gpio i2c spi; do getent group \$group > /dev/null || groupadd --system \$group; done
+	groupadd --system --gid 800 app
+	useradd --system --uid 800 --gid app --groups gpio,i2c,spi,video,input,dialout --home-dir /data/app-state \
+		--no-create-home --shell /usr/sbin/nologin app
+	systemctl enable applpi-data.service applpi-settings.service applpi-os-check.service applpi-app.service systemd-networkd.service wpa_supplicant@wlan0.service ssh.service avahi-daemon.service
 	systemctl disable wpa_supplicant.service
 	# Its host keys would be made at every boot (each boot of a read-only root is a "first boot"): ours are on /data
 	systemctl mask sshd-keygen.service

@@ -8,9 +8,9 @@ as a Pico W, with Python, the network, USB and GPIO.
 - **Safe updates:** a new image goes on over SSH into a second OS slot, and the Pi tries it once. It keeps it only if
   it starts properly, and otherwise goes back to the OS it had, by itself.
 - **Minimal:** Raspberry Pi OS Lite with no desktop, no Bluetooth and no automatic updates. Nothing listens except
-  SSH (by key only), mDNS and the apps you deploy.
-- **Apps on their own:** apps are plain Python, kept on a separate data partition and deployed from their own repos
-  over SSH. Installing a new OS image leaves them alone.
+  SSH (by key only), mDNS and the app you deploy.
+- **Apps on their own:** one app per Pi, like a Pico's firmware: plain Python, kept on a separate data partition and
+  deployed from its own repo over SSH. Installing a new OS image leaves it alone.
 - **No serial cable or screen needed:** the card is flashed from Windows with the Pi's name, Wi-Fi and SSH key, so it
   comes up on the network ready for SSH.
 
@@ -65,6 +65,23 @@ if it starts properly (no failed services, SSH and the network up, within 5 minu
 which the hardware watchdog catches), it restarts into the OS it had, and `applpi` says why. Apps, settings and the
 host key are on the data partition, so they stay as they were. An update takes about 6 minutes over Wi-Fi.
 
+## Apps
+
+A Pi runs one app, like a Pico runs its firmware: plain Python in its own repo, deployed over SSH. Deploying a
+different app replaces the one that was there. [ApplPi Hello](https://github.com/EarthstormSoftware/applpi-hello)
+is the example, and the place to start a new one:
+
+```powershell
+.\deploy.ps1 <name>     # in the app's repo: copies it to the Pi, starts it, and says whether it's running
+```
+
+The app is in `/data/app`, with its manifest (`app.json`: name, version, and whether it must run as root),
+`main.py` and its pure-Python libraries in `lib\`. The Pi runs it as the `app` user, which may use port 80 and the
+hardware (GPIO, I2C, SPI, the display, touch, serial), restarts it if it stops, and keeps it through OS updates: an
+update whose OS stops the app from running goes back. The app keeps what it writes in `/data/app-state`, as the
+rest is read-only. On the Pi, `journalctl -u applpi-app` shows its output, and `sudo /usr/lib/applpi/app remove`
+removes it.
+
 ## The `applpi` command
 
 Run as `dotnet run --project src\ApplPi.Cli -- <command>`:
@@ -80,7 +97,7 @@ Run as `dotnet run --project src\ApplPi.Cli -- <command>`:
 ## On the Pi
 
 With a monitor connected, the Pi shows the ApplPi OS logo while it boots, then its name, addresses, image version,
-OS slot and last update; an SSH login opens with the same information beside the apple. The last update shows as
+app, OS slot and last update; an SSH login opens with the same information beside the apple. The last update shows as
 **Successful** in green, or **Failed** in orange with the version that was tried and why it wasn't kept. The screen
 blanks after 5 minutes without a key pressed. The boot messages are in the journal (`journalctl -b`); to see them on
 screen, remove `quiet loglevel=3 splash` from the slot's `cmdline.txt` (`slotA\` or `slotB\`) on the card.

@@ -10,7 +10,8 @@
   os-update try      restarts into the written slot, for one boot (the firmware's tryboot)
   os-update commit   makes the running slot permanent (config.txt), after a tryboot into it
   os-update check    at every boot (applpi-os-check.service): on a trial boot, commits the slot once the system has
-                     started with no failed units, SSH and the network, or restarts into the permanent slot
+                     started with no failed units, SSH and the network (and the app, if it was running before
+                     the update, keeps running), or restarts into the permanent slot
   os-update fallback in emergency or rescue mode: on a trial boot, restarts into the permanent slot
 
 The running slot is never written, and config.txt only changes on commit, so any failure, power cut or hang before
@@ -35,10 +36,12 @@ TRYBOOT_FLAG = Path("/proc/device-tree/chosen/bootloader/tryboot")
 # What the check found on this boot, for status: checking, kept, or failed: <why>
 CHECK_STATE = Path("/run/applpi/os-check")
 # The last update, kept on the data partition (shell variables, which the login screens read with the slot helper):
-# UPDATE_WRITTEN (seconds since 1970, when write finished), UPDATE_SLOT, UPDATE_VERSION, UPDATE_TRIED (1 once tried)
-# and UPDATE_RESULT (kept, or failed: why), which the trial boot's check sets, so the slot it goes back to can say why
+# UPDATE_WRITTEN (seconds since 1970, when write finished), UPDATE_SLOT, UPDATE_VERSION, UPDATE_APP (1 if the app
+# was running then, so the trial boot checks it too), UPDATE_TRIED (1 once tried) and UPDATE_RESULT (kept, or failed: why), which the trial boot's check sets, so the slot it goes back to can say why
 UPDATE_RECORD = Path("/data/.os-update-last")
 CHECK_SECONDS = 300
+# How long the app (if it was running before the update) must have kept running on a trial boot
+APP_SECONDS = 30
 # The root partition of each slot
 SLOTS = {"A": 2, "B": 3}
 CHUNK = 4 << 20
@@ -391,7 +394,8 @@ def write(block_map=None):
                                 flags=re.MULTILINE)
         replace_file(BOOT / "tryboot.txt", config)
         write_record({"UPDATE_WRITTEN": int(time.time()), "UPDATE_SLOT": target,
-                      "UPDATE_VERSION": release_values(slot_dir).get("VERSION", "?")})
+                      "UPDATE_VERSION": release_values(slot_dir).get("VERSION", "?"),
+                      "UPDATE_APP": int(app_state()["SubState"] == "running")})
         say(f"Slot {target} is ready to try: {release(slot_dir)}")
     finally:
         if os.path.ismount(mounted):
@@ -452,7 +456,26 @@ def health():
                             capture_output=True)
     if online.returncode != 0:
         return f"No network within {minutes} minutes"
+    # The app, if it was running before the update: it must keep running for a while on the new OS
+    if read_record().get("UPDATE_APP") == "1":
+        while True:
+            app = app_state()
+            if app["SubState"] in ("failed", "dead") or app["NRestarts"] != "0":
+                return "The app kept stopping (journalctl -u applpi-app says why)"
+            if app["SubState"] == "running" and \
+                    time.monotonic() - int(app["ActiveEnterTimestampMonotonic"]) / 1e6 >= APP_SECONDS:
+                break
+            if time.monotonic() > deadline:
+                return f"The app didn't start within {minutes} minutes"
+            time.sleep(2)
     return None
+
+
+def app_state():
+    """applpi-app.service's SubState (running, auto-restart, failed...), NRestarts and ActiveEnterTimestampMonotonic."""
+    keys = ("SubState", "NRestarts", "ActiveEnterTimestampMonotonic")
+    shown = systemctl("show", *(f"--property={key}" for key in keys), "applpi-app.service").stdout
+    return dict(line.split("=", 1) for line in shown.splitlines() if "=" in line)
 
 
 def check():

@@ -50,5 +50,7 @@ if ! mountpoint -q /data; then
 	fsck.ext4 -p "$data_dev" || [ $? -le 1 ]
 	mount -o noatime "$data_dev" /data
 fi
-install -d -m 755 /data/apps
 install -d -m 700 /data/settings /data/ssh
+# The app's own (app installs the app in /data/app); /data/apps was v0.2.0's
+install -d -m 700 -o app -g app /data/app-state
+rmdir /data/apps 2> /dev/null || true

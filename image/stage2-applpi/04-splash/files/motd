@@ -11,8 +11,10 @@ info=(
 	"Name          $(hostname).local"
 	"IPv4          ${ipv4:-none}"
 	"IPv6          ${ipv6:-none}"
-	"OS slot       $(/usr/lib/applpi/slot)"
 )
+# The app, and the OS slot
+mapfile -t -O "${#info[@]}" info < <(/usr/lib/applpi/slot app)
+info+=("OS slot       $(/usr/lib/applpi/slot)")
 # The last OS update, if there's been one: a line or two, labelled and coloured
 mapfile -t -O "${#info[@]}" info < <(/usr/lib/applpi/slot update)
 mapfile -t logo < /usr/share/applpi/logo.ansi

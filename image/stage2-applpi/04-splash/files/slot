@@ -7,7 +7,10 @@
 #                   Last updated  Successful, 2026-10-26 11:40 CET
 #                   Last updated  Failed, 2026-10-26 11:36 CET: v0.2.0-broken
 #                                 A service failed to start: example.service
-#   slot issue    writes the console's /etc/issue from its template with both
+#   slot app      the app, as a labelled line in colour (and its error on the next line, if it couldn't start):
+#                   App           hello 1.0.0, running
+#   slot issue    writes the console's /etc/issue from its template with all three
+#   slot refresh  writes /etc/issue and has the console redraw it (when the slot or the app changes)
 set -eu
 
 partition=$(sed -n 's/.*root=PARTUUID=[0-9a-fA-F]\{8\}-\([0-9]\{2\}\).*/\1/p' /proc/cmdline)
@@ -52,20 +55,56 @@ last_update() {
 	esac
 }
 
+# The app (applpi-app.service), from what app run found when it last started it
+app() {
+	label='App           '
+	if [ ! -e /data/app/main.py ]; then
+		printf '%snone\n' "$label"
+		return 0
+	fi
+	APP_NAME='' APP_VERSION='' APP_ERROR=''
+	[ -r /run/applpi/app ] && . /run/applpi/app
+	if [ -n "$APP_ERROR" ]; then
+		printf '%s%sNot started%s\n              %s\n' "$label" "$orange" "$reset" "$APP_ERROR"
+		return 0
+	fi
+	# Run by the service as it stops (ExecStopPost, which has SERVICE_RESULT), it's stopped whatever systemd says
+	sub_state=stopped
+	[ -n "${SERVICE_RESULT:-}" ] || sub_state=$(systemctl show -p SubState --value applpi-app.service)
+	case "$sub_state" in
+		running) state="${green}running${reset}" ;;
+		auto-restart) state="${orange}restarting${reset}" ;;
+		failed) state="${orange}failed${reset}" ;;
+		dead|stop*|final*) state="${orange}stopped${reset}" ;;
+		*) state=starting ;;
+	esac
+	printf '%s%s%s\n' "$label" "${APP_NAME:+$APP_NAME $APP_VERSION, }" "$state"
+}
+
+# The console's text, indented by two; without backslashes (agetty's escapes)
+issue() {
+	orange=$(printf '\033[33m')
+	SLOT=$slot UPDATE=$(last_update | tr -d '\\') APP=$(app | tr -d '\\') awk '
+		function block(name,    n, i, lines) {
+			n = split(ENVIRON[name], lines, "\n")
+			for (i = 1; i <= n; i++) if (lines[i] != "") print "  " lines[i]
+		}
+		index($0, "@UPDATE@") { block("UPDATE"); next }
+		index($0, "@APP@") { block("APP"); next }
+		(at = index($0, "@SLOT@")) { $0 = substr($0, 1, at - 1) ENVIRON["SLOT"] substr($0, at + 6) }
+		{ print }' /usr/share/applpi/issue > /etc/issue
+}
+
 case "${1:-}" in
 	update)
 		last_update ;;
+	app)
+		app ;;
 	issue)
-		# The console's text, indented by two; without backslashes (agetty's escapes)
-		orange=$(printf '\033[33m')
-		SLOT=$slot UPDATE=$(last_update | tr -d '\\') awk '
-			index($0, "@UPDATE@") {
-				n = split(ENVIRON["UPDATE"], lines, "\n")
-				for (i = 1; i <= n; i++) if (lines[i] != "") print "  " lines[i]
-				next
-			}
-			(at = index($0, "@SLOT@")) { $0 = substr($0, 1, at - 1) ENVIRON["SLOT"] substr($0, at + 6) }
-			{ print }' /usr/share/applpi/issue > /etc/issue ;;
+		issue ;;
+	refresh)
+		issue
+		agetty --reload 2> /dev/null || true ;;
 	*)
 		printf '%s\n' "$slot" ;;
 esac

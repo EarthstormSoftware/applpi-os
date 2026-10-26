@@ -120,8 +120,15 @@ from the card's disk ID and the slot's partition (`-02` for A, `-03` for B).
   service doesn't start.
 - The app's web page is on port 80, as on the Pico, so it's at `http://<name>.local`. systemd gives the app the
   right to use port 80 without it being root.
-- A small manifest, `app.json`: name, version, whether it needs root (`rpi_ws281x` does) and the hardware it uses
-  (GPIO, I2C, SPI), which become the groups it runs with. Otherwise it runs as its own user, not `applpi`.
+- A small manifest, `app.json`: name, version and whether it needs root (`rpi_ws281x` does). Otherwise it runs as
+  its own user, `app` (not `applpi`), which may use all the hardware, as on a Pico: GPIO, I2C and SPI (udev rules
+  give their groups the devices), the display, touch and serial ports. Switching on I2C or SPI in `config.txt` is
+  for when an app needs it.
+- The image's `app` command installs an app from a `.tar` of its folder (which `deploy.ps1` copies over), checks
+  its manifest first and that it keeps running after, and removes it. A different app (another name) starts with
+  empty state.
+- An OS update checks the app too: if it was running before the update, the trial boot is only kept if the app
+  keeps running for 30 seconds.
 - The root filesystem is read-only, so the app keeps its settings and anything else it writes in `/data/app-state`,
   which a deploy leaves alone.
 - Both login screens show the app's name, version and whether it's running, beside the slot and last update.

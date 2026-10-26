@@ -26,7 +26,8 @@ echo "== Details"
 	systemd-analyze blame | head -12
 	systemctl show -p RuntimeWatchdogUSec; cat /sys/class/watchdog/watchdog0/state 2>&1
 	sudo -n journalctl -b -u applpi-data -u applpi-settings -u applpi-os-check --no-pager
-	bash /etc/update-motd.d/00-applpi | sed "s/\x1b\[[0-9;]*m//g" | tail -8
+	systemctl status --no-pager --lines=5 applpi-app; sudo -n ls -l /data/app /data/app-state
+	bash /etc/update-motd.d/00-applpi | sed "s/\x1b\[[0-9;]*m//g" | tail -9
 	grep -A2 "OS slot" /etc/issue
 ) 2>&1
 
@@ -38,8 +39,8 @@ failed_units() {
 	[ "$state" = running ] && [ -z "$units" ] || { echo "the system is $state${units:+; failed: $units}"; return 1; }
 }
 
-# Only SSH (port 22), mDNS (Avahi), the DNS stub on the loopback (resolved) and DHCP (networkd's clients: 68 for
-# IPv4, 546 for IPv6)
+# Only SSH (port 22), mDNS (Avahi), the DNS stub on the loopback (resolved), DHCP (networkd's clients: 68 for IPv4,
+# 546 for IPv6) and the app's web page (port 80)
 listening() {
 	sudo -n ss -tulpnH | awk '
 		{ match($0, /users:\(\("[^"]+"/); name = substr($0, RSTART + 9, RLENGTH - 10); local = $5 }
@@ -47,6 +48,7 @@ listening() {
 		name == "avahi-daemon" { next }
 		name == "systemd-resolve" && local ~ /^127\.0\.0\.5[34](%lo)?:53$/ { next }
 		name == "systemd-network" && local ~ /:(68|546)$/ { next }
+		name == "python3" && local ~ /:80$/ { next }
 		{ print name " on " local; bad = 1 }
 		END { exit bad }'
 }
@@ -102,6 +104,23 @@ timers() {
 login_screens() {
 	grep -q "OS slot" /etc/issue || { echo "the console's text has no slot"; return 1; }
 	bash /etc/update-motd.d/00-applpi | grep -q "OS slot" || { echo "the SSH login screen has no slot"; return 1; }
+	grep -q "App  " /etc/issue || { echo "the console's text has no app"; return 1; }
+	bash /etc/update-motd.d/00-applpi | grep -q "App  " || { echo "the SSH login screen has no app"; return 1; }
+}
+
+# If there's an app: running, not restarting, and its web page answering (any HTTP answer will do)
+app() {
+	[ -e /data/app/main.py ] || return 0
+	local state restarts
+	state=$(systemctl show -p SubState --value applpi-app); restarts=$(systemctl show -p NRestarts --value applpi-app)
+	[ "$state" = running ] && [ "$restarts" = 0 ] || { echo "the app is $state, restarted $restarts times"; return 1; }
+	python3 -c 'import urllib.request, urllib.error, sys
+try:
+    urllib.request.urlopen("http://localhost/", timeout=10)
+except urllib.error.HTTPError:
+    pass
+except OSError as error:
+    sys.exit(f"its web page: {error}")' || return 1
 }
 
 sudo_works() {
@@ -121,7 +140,7 @@ check() {
 	fi
 }
 check failed_units "no failed units"
-check listening "only SSH, mDNS, the DNS stub and DHCP listening"
+check listening "only SSH, mDNS, the DNS stub, DHCP and the app listening"
 check read_only_root "read-only root"
 check no_root_login "root can't log in"
 check no_partition_ids "no partition IDs in fstab"
@@ -130,6 +149,7 @@ check settings_applied "settings applied, applpi.json gone"
 check slot "running the permanent slot"
 [ "$mode" = qemu ] || check watchdog "hardware watchdog running"
 check timers "no timers that change the system"
-check login_screens "login screens show the slot"
+check login_screens "login screens show the slot and the app"
+check app "the app runs and answers (if there is one)"
 check sudo_works "sudo works for the admin user"
 exit $result

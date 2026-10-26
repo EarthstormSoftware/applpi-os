@@ -1,0 +1,5 @@
+# The hardware an app may use without being root, for the groups the app user is in (as Raspberry Pi OS's 99-com.rules)
+SUBSYSTEM=="gpio", KERNEL=="gpiochip*", GROUP="gpio", MODE="0660"
+KERNEL=="gpiomem", GROUP="gpio", MODE="0660"
+SUBSYSTEM=="i2c-dev", GROUP="i2c", MODE="0660"
+SUBSYSTEM=="spidev", GROUP="spi", MODE="0660"

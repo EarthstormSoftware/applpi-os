@@ -48,8 +48,9 @@ install -m 755 files/motd "${ROOTFS_DIR}/etc/update-motd.d/00-applpi"
 chmod -x "${ROOTFS_DIR}/etc/update-motd.d/10-uname" "${ROOTFS_DIR}/etc/update-motd.d/97-overlayroot"
 : > "${ROOTFS_DIR}/etc/motd"
 
-# Both screens show the running OS slot: the console's text is written from this template at each boot
+# Both screens show the app and the running OS slot: the console's text is written from this template at each boot,
+# and when the app starts or stops
 install -m 755 files/slot "${ROOTFS_DIR}/usr/lib/applpi/"
 . "${ROOTFS_DIR}/etc/applpi-release"
 sed "s/@VERSION@/${VERSION}/; s/@BUILD_STAMP@/${BUILD_STAMP}/" files/issue > "${ROOTFS_DIR}/usr/share/applpi/issue"
-sed "s/@SLOT@/unknown/; /@UPDATE@/d" "${ROOTFS_DIR}/usr/share/applpi/issue" > "${ROOTFS_DIR}/etc/issue"
+sed "s/@SLOT@/unknown/; /@UPDATE@/d; /@APP@/d" "${ROOTFS_DIR}/usr/share/applpi/issue" > "${ROOTFS_DIR}/etc/issue"
