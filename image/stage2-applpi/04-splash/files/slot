@@ -2,8 +2,11 @@
 # For the login screens:
 #   slot          the OS slot running now: "A", or "B (on trial: a restart goes back to A)" when it was started by
 #                 tryboot and isn't permanent yet
-#   slot update   the last OS update (from os-update's record on the data partition), or nothing if there's been none:
-#                 "2026-10-26 11:40 CET: v0.2.0 to slot B, kept", or "..., not kept (failed units: ...)"
+#   slot update   the last OS update (from os-update's record on the data partition), as labelled lines in colour,
+#                 or nothing if there's been none:
+#                   Last updated  Successful, 2026-10-26 11:40 CET
+#                   Last updated  Failed, 2026-10-26 11:36 CET: v0.2.0-broken
+#                                 A service failed to start: example.service
 #   slot issue    writes the console's /etc/issue from its template with both
 set -eu
 
@@ -19,37 +22,50 @@ if [ "$slot" != unknown ] && [ -n "$permanent" ] && [ "$permanent" != "$slot" ];
 	slot="$slot (on trial: a restart goes back to $permanent)"
 fi
 
+green=$(printf '\033[32m')
+reset=$(printf '\033[0m')
+# Orange: a terminal's 256-colour orange over SSH; the console has 16 colours, and its "yellow" is a brownish orange
+orange=$(printf '\033[38;5;208m')
+
 last_update() {
 	[ -r /data/.os-update-last ] || return 0
 	UPDATE_WRITTEN='' UPDATE_SLOT='' UPDATE_VERSION='' UPDATE_TRIED='' UPDATE_RESULT=''
 	. /data/.os-update-last
+	when=$(date -d "@$UPDATE_WRITTEN" '+%Y-%m-%d %H:%M %Z')
+	label='Last updated  '
+	indent='              '
 	case "$UPDATE_RESULT" in
-		kept) state=kept ;;
-		failed:*) state="not kept (${UPDATE_RESULT#failed: })" ;;
+		kept)
+			printf '%s%sSuccessful%s, %s\n' "$label" "$green" "$reset" "$when" ;;
+		failed:*)
+			printf '%s%sFailed%s, %s: %s\n%s%s\n' "$label" "$orange" "$reset" "$when" "$UPDATE_VERSION" "$indent" \
+				"${UPDATE_RESULT#failed: }" ;;
 		*)
 			if [ "$UPDATE_TRIED" != 1 ]; then
-				state="not tried yet"
+				printf '%sWaiting, %s: %s is in slot %s, not tried yet\n' "$label" "$when" "$UPDATE_VERSION" "$UPDATE_SLOT"
 			elif [ "$current" = "$UPDATE_SLOT" ]; then
-				state="being checked"
+				printf '%sChecking, %s: %s\n' "$label" "$when" "$UPDATE_VERSION"
 			else
-				state="not kept (it didn't start, or hung)"
+				printf '%s%sFailed%s, %s: %s\n%sIt didn'\''t start, or it hung\n' "$label" "$orange" "$reset" "$when" \
+					"$UPDATE_VERSION" "$indent"
 			fi ;;
 	esac
-	printf '%s: %s to slot %s, %s\n' "$(date -d "@$UPDATE_WRITTEN" '+%Y-%m-%d %H:%M %Z')" "$UPDATE_VERSION" \
-		"$UPDATE_SLOT" "$state"
 }
 
 case "${1:-}" in
 	update)
 		last_update ;;
 	issue)
-		# Without backslashes (agetty's escapes), and with sed's special characters escaped
-		update=$(last_update | tr -d '\\' | sed 's/[&|]/\\&/g')
-		if [ -n "$update" ]; then
-			sed "s|@SLOT@|${slot}|; s|@UPDATE@|${update}|" /usr/share/applpi/issue > /etc/issue
-		else
-			sed "s|@SLOT@|${slot}|; /@UPDATE@/d" /usr/share/applpi/issue > /etc/issue
-		fi ;;
+		# The console's text, indented by two; without backslashes (agetty's escapes)
+		orange=$(printf '\033[33m')
+		SLOT=$slot UPDATE=$(last_update | tr -d '\\') awk '
+			index($0, "@UPDATE@") {
+				n = split(ENVIRON["UPDATE"], lines, "\n")
+				for (i = 1; i <= n; i++) if (lines[i] != "") print "  " lines[i]
+				next
+			}
+			(at = index($0, "@SLOT@")) { $0 = substr($0, 1, at - 1) ENVIRON["SLOT"] substr($0, at + 6) }
+			{ print }' /usr/share/applpi/issue > /etc/issue ;;
 	*)
 		printf '%s\n' "$slot" ;;
 esac

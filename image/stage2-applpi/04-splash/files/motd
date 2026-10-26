@@ -8,13 +8,13 @@ info=(
 	""
 	$'\e[32mApplPi OS\e[0m '"${VERSION}, build ${BUILD_STAMP} UTC"
 	""
-	"Name      $(hostname).local"
-	"IPv4      ${ipv4:-none}"
-	"IPv6      ${ipv6:-none}"
-	"OS slot   $(/usr/lib/applpi/slot)"
+	"Name          $(hostname).local"
+	"IPv4          ${ipv4:-none}"
+	"IPv6          ${ipv6:-none}"
+	"OS slot       $(/usr/lib/applpi/slot)"
 )
-update=$(/usr/lib/applpi/slot update)
-[ -z "$update" ] || info+=("Updated   ${update}")
+# The last OS update, if there's been one: a line or two, labelled and coloured
+mapfile -t -O "${#info[@]}" info < <(/usr/lib/applpi/slot update)
 mapfile -t logo < /usr/share/applpi/logo.ansi
 blank=$(printf '%*s' "$(printf '%s' "${logo[0]}" | sed 's/\x1b\[[0-9;]*m//g' | wc -m)" '')
 

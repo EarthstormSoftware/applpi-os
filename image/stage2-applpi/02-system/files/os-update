@@ -433,22 +433,25 @@ def systemctl(*args):
 
 def health():
     """None if this boot is healthy within CHECK_SECONDS: started with no failed units, SSH running and a routable
-    network (updates come over it). Otherwise why not."""
+    network (updates come over it). Otherwise why not, as a sentence for the login screens and applpi."""
     deadline = time.monotonic() + CHECK_SECONDS
+    minutes = CHECK_SECONDS // 60
     while (state := systemctl("is-system-running").stdout.strip()) in ("initializing", "starting"):
         if time.monotonic() > deadline:
-            return "it didn't finish starting"
+            return f"It didn't finish starting within {minutes} minutes"
         time.sleep(5)
     if state != "running":
         failed = [line.split()[0] for line in systemctl("--failed", "--no-legend", "--plain").stdout.splitlines() if line]
-        return f"failed units: {', '.join(failed)}" if failed else f"the system is {state}"
+        if len(failed) == 1:
+            return f"A service failed to start: {failed[0]}"
+        return f"{len(failed)} services failed to start: {', '.join(failed)}" if failed else f"The system is {state}"
     if systemctl("is-active", "--quiet", "ssh.service").returncode != 0:
-        return "SSH isn't running"
+        return "SSH didn't start"
     remaining = max(10, int(deadline - time.monotonic()))
     online = subprocess.run(["/usr/lib/systemd/systemd-networkd-wait-online", "--any", f"--timeout={remaining}"],
                             capture_output=True)
     if online.returncode != 0:
-        return "no network"
+        return f"No network within {minutes} minutes"
     return None
 
 

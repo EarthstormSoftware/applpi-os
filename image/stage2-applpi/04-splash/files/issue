@@ -7,12 +7,13 @@
 
 
 
+
   \e{green}ApplPi OS\e{reset} @VERSION@, build @BUILD_STAMP@ UTC
 
-  Name      \n.local
-  IPv4      \4
-  IPv6      \6
-  OS slot   @SLOT@
-  Updated   @UPDATE@
-  Log in    ssh applpi@\n.local
+  Name          \n.local
+  IPv4          \4
+  IPv6          \6
+  OS slot       @SLOT@
+@UPDATE@
+  Log in        ssh applpi@\n.local
 
