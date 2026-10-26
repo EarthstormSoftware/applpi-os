@@ -28,7 +28,7 @@ as a Pico W, with Python, the network, USB and GPIO.
   images yet).
 
 ```powershell
-git clone https://github.com/raruston-es/applpi-os
+git clone https://github.com/EarthstormSoftware/applpi-os
 cd applpi-os
 .\image\build.ps1                                # the image, in deploy\: about 20 minutes
 dotnet run --project src\ApplPi.Cli -- flash     # write it to a card, with the Pi's settings
