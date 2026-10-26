@@ -70,6 +70,22 @@ public static class SshKeys
         File.WriteAllLines(knownHostsFile, lines);
     }
 
+    /// <summary>Makes ssh forget a host name's keys. Returns whether it knew any.</summary>
+    public static bool ForgetHost(string knownHostsFile, string host)
+    {
+        if (!File.Exists(knownHostsFile))
+        {
+            return false;
+        }
+        var lines = File.ReadAllLines(knownHostsFile).ToList();
+        var removed = lines.RemoveAll(line => line.Split(' ', 2)[0].Split(',').Contains(host, StringComparer.OrdinalIgnoreCase));
+        if (removed > 0)
+        {
+            File.WriteAllLines(knownHostsFile, lines);
+        }
+        return removed > 0;
+    }
+
     static bool RunKeygen(string[] args)
     {
         using var keygen = Process.Start(new ProcessStartInfo("ssh-keygen", args) { UseShellExecute = false })

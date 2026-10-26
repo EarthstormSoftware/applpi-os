@@ -24,6 +24,7 @@ static class Program
                                 Update a Pi's OS over SSH (the image defaults to the newest in deploy\). The new OS
                                 goes into the slot that isn't running, and the Pi restarts into it once; it keeps it
                                 if it starts properly, and otherwise goes back to the OS it had. --yes doesn't ask.
+          applpi forget <name>  Forget a Pi you no longer use: its saved settings and host key, and ssh's known host.
           applpi --version      Show this tool's version.
 
         Settings are remembered in %APPDATA%\ApplPi (Wi-Fi passwords encrypted for your Windows account).
@@ -42,6 +43,7 @@ static class Program
                 ["flash", var image] => Flash(image, elevated: false),
                 ["flash", var image, "--elevated"] => Flash(image, elevated: true),
                 ["update", .. var rest] when rest.Count(arg => arg != "--yes") <= 2 => Update(rest),
+                ["forget", var name] => Forget(name),
                 ["--version"] => ShowVersion(),
                 _ => ShowUsage(),
             };
@@ -281,6 +283,30 @@ static class Program
         if (wifi is null)
         {
             Console.WriteLine("No Wi-Fi: connect the Pi with an Ethernet cable.");
+        }
+        return 0;
+    }
+
+    static int Forget(string name)
+    {
+        name = name.ToLowerInvariant();
+        var store = DeviceStore.Load(DeviceStore.DefaultPath);
+        var settings = store.Remove(name);
+        if (settings)
+        {
+            store.Save(DeviceStore.DefaultPath);
+        }
+        var host = SshKeys.ForgetHost(SshKeys.DefaultKnownHostsFile, PiShell.HostFor(name));
+        if (!settings && !host)
+        {
+            Console.Error.WriteLine($"{name} isn't known on this PC: nothing to forget.");
+            return 1;
+        }
+        Console.WriteLine($"Forgot {name}: {(settings ? "its settings and host key" : "no saved settings")}, and " +
+            $"{(host ? $"{PiShell.HostFor(name)} in ssh's known_hosts" : "nothing in ssh's known_hosts")}.");
+        if (settings && store.LastDevice is { } last)
+        {
+            Console.WriteLine($"New Pis now start from {last}'s settings.");
         }
         return 0;
     }

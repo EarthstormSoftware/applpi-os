@@ -36,6 +36,31 @@ public sealed class StorageTests : IDisposable
     }
 
     [Fact]
+    public void StoreForgetsAPi()
+    {
+        var store = new DeviceStore();
+        store.Set(new DeviceSettings("oldpi", "Etc/UTC", null, []), "key.pub");
+        store.Set(new DeviceSettings("newpi", "Etc/UTC", null, []), "key.pub");
+        Assert.True(store.Remove("newpi"));
+        Assert.Null(store.Get("newpi"));
+        Assert.Equal("oldpi", store.LastDevice);
+        Assert.False(store.Remove("newpi"));
+        Assert.True(store.Remove("oldpi"));
+        Assert.Null(store.LastDevice);
+    }
+
+    [Fact]
+    public void SshForgetsAHost()
+    {
+        var knownHosts = Path.Combine(dir, "known_hosts");
+        File.WriteAllLines(knownHosts, ["oldpi.local ssh-ed25519 AAAA1", "other ssh-ed25519 AAAA2", "x,OldPi.local ssh-rsa AAAA3"]);
+        Assert.True(SshKeys.ForgetHost(knownHosts, "oldpi.local"));
+        Assert.Equal(["other ssh-ed25519 AAAA2"], File.ReadAllLines(knownHosts));
+        Assert.False(SshKeys.ForgetHost(knownHosts, "oldpi.local"));
+        Assert.False(SshKeys.ForgetHost(Path.Combine(dir, "none"), "oldpi.local"));
+    }
+
+    [Fact]
     public void BootPartitionRefusesSettingsThePiWouldReject() => Assert.Throws<ArgumentException>(
         () => new BootPartition(dir, "test").WriteSettings(new DeviceSettings("Bad_Name", null, null, [Key])));
 

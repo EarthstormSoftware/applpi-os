@@ -66,6 +66,23 @@ public sealed class DeviceStore
         LastDevice = settings.Hostname;
     }
 
+    /// <summary>
+    /// Forgets a Pi's settings. If it was the last one set up, the next one's defaults come from another (or none).
+    /// Returns whether it was known.
+    /// </summary>
+    public bool Remove(string hostname)
+    {
+        if (!Devices.Remove(hostname))
+        {
+            return false;
+        }
+        if (LastDevice == hostname)
+        {
+            LastDevice = Devices.Keys.LastOrDefault();
+        }
+        return true;
+    }
+
     static string Protect(string secret) => Convert.ToBase64String(
         ProtectedData.Protect(Encoding.UTF8.GetBytes(secret), null, DataProtectionScope.CurrentUser));
 
