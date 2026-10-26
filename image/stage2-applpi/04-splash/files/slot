@@ -1,21 +1,55 @@
 #!/bin/sh
-# The OS slot running now, for the login screens: "A", or "B (on trial: a restart goes back to A)" when it was started
-# by tryboot and isn't permanent yet. With "issue", writes the console's /etc/issue from its template with the slot.
+# For the login screens:
+#   slot          the OS slot running now: "A", or "B (on trial: a restart goes back to A)" when it was started by
+#                 tryboot and isn't permanent yet
+#   slot update   the last OS update (from os-update's record on the data partition), or nothing if there's been none:
+#                 "2026-10-26 11:40 CET: v0.2.0 to slot B, kept", or "..., not kept (failed units: ...)"
+#   slot issue    writes the console's /etc/issue from its template with both
 set -eu
 
 partition=$(sed -n 's/.*root=PARTUUID=[0-9a-fA-F]\{8\}-\([0-9]\{2\}\).*/\1/p' /proc/cmdline)
 case "$partition" in
-	02) slot=A ;;
-	03) slot=B ;;
-	*) slot=unknown ;;
+	02) current=A ;;
+	03) current=B ;;
+	*) current=unknown ;;
 esac
+slot=$current
 permanent=$(sed -n 's|^os_prefix=slot\([AB]\)/.*|\1|p' /boot/firmware/config.txt 2>/dev/null || true)
 if [ "$slot" != unknown ] && [ -n "$permanent" ] && [ "$permanent" != "$slot" ]; then
 	slot="$slot (on trial: a restart goes back to $permanent)"
 fi
 
-if [ "${1:-}" = issue ]; then
-	sed "s|@SLOT@|${slot}|" /usr/share/applpi/issue > /etc/issue
-else
-	echo "$slot"
-fi
+last_update() {
+	[ -r /data/.os-update-last ] || return 0
+	UPDATE_WRITTEN='' UPDATE_SLOT='' UPDATE_VERSION='' UPDATE_TRIED='' UPDATE_RESULT=''
+	. /data/.os-update-last
+	case "$UPDATE_RESULT" in
+		kept) state=kept ;;
+		failed:*) state="not kept (${UPDATE_RESULT#failed: })" ;;
+		*)
+			if [ "$UPDATE_TRIED" != 1 ]; then
+				state="not tried yet"
+			elif [ "$current" = "$UPDATE_SLOT" ]; then
+				state="being checked"
+			else
+				state="not kept (it didn't start, or hung)"
+			fi ;;
+	esac
+	printf '%s: %s to slot %s, %s\n' "$(date -d "@$UPDATE_WRITTEN" '+%Y-%m-%d %H:%M %Z')" "$UPDATE_VERSION" \
+		"$UPDATE_SLOT" "$state"
+}
+
+case "${1:-}" in
+	update)
+		last_update ;;
+	issue)
+		# Without backslashes (agetty's escapes), and with sed's special characters escaped
+		update=$(last_update | tr -d '\\' | sed 's/[&|]/\\&/g')
+		if [ -n "$update" ]; then
+			sed "s|@SLOT@|${slot}|; s|@UPDATE@|${update}|" /usr/share/applpi/issue > /etc/issue
+		else
+			sed "s|@SLOT@|${slot}|; /@UPDATE@/d" /usr/share/applpi/issue > /etc/issue
+		fi ;;
+	*)
+		printf '%s\n' "$slot" ;;
+esac

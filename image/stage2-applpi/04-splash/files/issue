@@ -13,5 +13,6 @@
   IPv4      \4
   IPv6      \6
   OS slot   @SLOT@
+  Updated   @UPDATE@
   Log in    ssh applpi@\n.local
 

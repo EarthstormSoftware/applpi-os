@@ -22,6 +22,7 @@ import hashlib
 import lzma
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -33,8 +34,10 @@ WORK = Path("/data/.os-update")
 TRYBOOT_FLAG = Path("/proc/device-tree/chosen/bootloader/tryboot")
 # What the check found on this boot, for status: checking, kept, or failed: <why>
 CHECK_STATE = Path("/run/applpi/os-check")
-# The last trial boot's verdict, kept on the data partition so the slot it goes back to can say why
-LAST_TRIAL = Path("/data/.os-update-last")
+# The last update, kept on the data partition (shell variables, which the login screens read with the slot helper):
+# UPDATE_WRITTEN (seconds since 1970, when write finished), UPDATE_SLOT, UPDATE_VERSION, UPDATE_TRIED (1 once tried)
+# and UPDATE_RESULT (kept, or failed: why), which the trial boot's check sets, so the slot it goes back to can say why
+UPDATE_RECORD = Path("/data/.os-update-last")
 CHECK_SECONDS = 300
 # The root partition of each slot
 SLOTS = {"A": 2, "B": 3}
@@ -80,13 +83,36 @@ def prefix_slot(config):
     return found.group(1) if found else None
 
 
-def release(directory):
-    """'<version> (build <stamp>)' from a directory's applpi-release.txt, or '' without one."""
+def release_values(directory):
     file = directory / "applpi-release.txt"
     if not file.exists():
-        return ""
-    values = dict(line.split("=", 1) for line in file.read_text().splitlines() if "=" in line)
-    return f"{values.get('VERSION', '?')} (build {values.get('BUILD_STAMP', '?')})"
+        return {}
+    return dict(line.split("=", 1) for line in file.read_text().splitlines() if "=" in line)
+
+
+def release(directory):
+    """'<version> (build <stamp>)' from a directory's applpi-release.txt, or '' without one."""
+    values = release_values(directory)
+    return f"{values.get('VERSION', '?')} (build {values.get('BUILD_STAMP', '?')})" if values else ""
+
+
+def read_record():
+    if not UPDATE_RECORD.exists():
+        return {}
+    return dict(token.split("=", 1) for line in UPDATE_RECORD.read_text().splitlines()
+                for token in shlex.split(line) if "=" in token)
+
+
+def write_record(record):
+    UPDATE_RECORD.write_text("".join(f"{key}={shlex.quote(str(value))}\n" for key, value in record.items()))
+    os.sync()
+
+
+def update_record(slot, **values):
+    """Adds to the record of the last update, if it's about this slot."""
+    record = read_record()
+    if record.get("UPDATE_SLOT") == slot:
+        write_record(record | values)
 
 
 def status():
@@ -98,7 +124,8 @@ def status():
     print(f"waiting={prefix_slot(BOOT / 'tryboot.txt') or ''}")
     print(f"check={CHECK_STATE.read_text().strip() if CHECK_STATE.exists() else ''}")
     # "<slot> <kept|failed: why>" from the last trial boot that got as far as its check
-    print(f"last={LAST_TRIAL.read_text().strip() if LAST_TRIAL.exists() else ''}")
+    record = read_record()
+    print(f"last={record['UPDATE_SLOT'] + ' ' + record['UPDATE_RESULT'] if 'UPDATE_RESULT' in record else ''}")
     # What this os-update can do, for applpi: write takes a block map
     print("features=map")
     for name in SLOTS:
@@ -324,7 +351,7 @@ def write(block_map=None):
 
     # Nothing may try the slot while it's being written, and the last trial's verdict is about another image
     (BOOT / "tryboot.txt").unlink(missing_ok=True)
-    LAST_TRIAL.unlink(missing_ok=True)
+    UPDATE_RECORD.unlink(missing_ok=True)
     shutil.rmtree(WORK, ignore_errors=True)
     WORK.mkdir(mode=0o700)
     mounted = WORK / "image"
@@ -363,6 +390,8 @@ def write(block_map=None):
         config, count = re.subn(r"^os_prefix=slotA/\s*$", f"os_prefix=slot{target}/", (mounted / "config.txt").read_text(),
                                 flags=re.MULTILINE)
         replace_file(BOOT / "tryboot.txt", config)
+        write_record({"UPDATE_WRITTEN": int(time.time()), "UPDATE_SLOT": target,
+                      "UPDATE_VERSION": release_values(slot_dir).get("VERSION", "?")})
         say(f"Slot {target} is ready to try: {release(slot_dir)}")
     finally:
         if os.path.ismount(mounted):
@@ -376,6 +405,7 @@ def try_slot():
     if waiting is None or waiting == slot:
         raise UpdateError("No update is waiting to be tried: run 'os-update write' first.")
     say(f"Restarting into slot {waiting} for one boot")
+    update_record(waiting, UPDATE_TRIED=1)
     subprocess.run(["systemctl", "--no-block", "--reboot-argument=0 tryboot", "reboot"], check=True)
 
 
@@ -390,6 +420,7 @@ def commit():
     shutil.copyfile(BOOT / f"slot{slot}" / "applpi-release.txt", BOOT / "applpi-release.txt")
     (BOOT / "tryboot.txt").unlink()
     os.sync()
+    update_record(slot, UPDATE_RESULT="kept")
     # The console said the slot was on trial: it says so no longer
     subprocess.run(["/usr/lib/applpi/slot", "issue"], check=False)
     subprocess.run(["agetty", "--reload"], check=False)
@@ -426,24 +457,20 @@ def check():
     if not tried() or prefix_slot(BOOT / "tryboot.txt") != slot or prefix_slot(BOOT / "config.txt") == slot:
         return
 
-    def note(text, last=False):
+    def note(text):
         CHECK_STATE.parent.mkdir(parents=True, exist_ok=True)
         CHECK_STATE.write_text(text + "\n")
-        if last:
-            LAST_TRIAL.write_text(f"{slot} {text}\n")
-            os.sync()
 
     note("checking")
-    # A new trial: the last one's verdict no longer applies
-    LAST_TRIAL.unlink(missing_ok=True)
     say(f"Slot {slot} is on trial: checking it")
     problem = health()
     if problem is None:
         commit()
-        note("kept", last=True)
+        note("kept")
     else:
         permanent = prefix_slot(BOOT / "config.txt")
-        note(f"failed: {problem}", last=True)
+        note(f"failed: {problem}")
+        update_record(slot, UPDATE_RESULT=f"failed: {problem}")
         say(f"Slot {slot} isn't healthy ({problem}): restarting into slot {permanent}")
         subprocess.run(["systemctl", "--no-block", "reboot"], check=True)
 

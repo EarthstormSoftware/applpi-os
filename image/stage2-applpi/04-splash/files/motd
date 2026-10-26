@@ -13,6 +13,8 @@ info=(
 	"IPv6      ${ipv6:-none}"
 	"OS slot   $(/usr/lib/applpi/slot)"
 )
+update=$(/usr/lib/applpi/slot update)
+[ -z "$update" ] || info+=("Updated   ${update}")
 mapfile -t logo < /usr/share/applpi/logo.ansi
 blank=$(printf '%*s' "$(printf '%s' "${logo[0]}" | sed 's/\x1b\[[0-9;]*m//g' | wc -m)" '')
 
