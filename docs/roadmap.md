@@ -133,11 +133,16 @@ from the card's disk ID and the slot's partition (`-02` for A, `-03` for B).
   empty state.
 - An OS update checks the app too: if it was running before the update, the trial boot is only kept if the app
   keeps running for 30 seconds.
-- To come (for App Base, so an ApplPi app's page can change what a Pico's can): the app may ask the OS, and only
-  for these, to install a new version of itself sent over the network (on trial: if it doesn't keep running, the
-  old one goes back), to set the time zone and NTP server, to restart the Pi, and to start setup mode (step 7: the
-  name and Wi-Fi are changed there, as the name is how SSH and `applpi` know the Pi). `systemd`'s watchdog for the
-  app, so a hung app (not only one that stops) is restarted.
+- What the app may ask the OS (v0.4, for App Base, so an ApplPi app's page can change what a Pico's can):
+  `/usr/lib/applpi/app-request`, which the `app` user may run as root by `sudo`, and nothing else. It installs a new
+  version of the app sent over the network (`update`, from `/data/app-state/update.tar`, opened without following
+  links: in its own unit, as the app is restarted; on trial, with the old version kept until the new one has run
+  for 30 seconds, and put back otherwise; `/data/app-state/update-result.json` says how it went), sets the time zone
+  and the time server (kept in `device.json`, applied at once and at each boot), and restarts the Pi. Starting setup
+  mode comes with step 7 (the name and Wi-Fi are changed there, as the name is how SSH and `applpi` know the Pi).
+- `systemd`'s watchdog for the app, so a hung app (not only one that stops) is restarted: the app asks for it itself
+  (`WATCHDOG_USEC=`, then `WATCHDOG=1` while its event loop runs, as App Base does; the service has
+  `NotifyAccess=main`), so an app that doesn't ask has none.
 - The root filesystem is read-only, so the app keeps its settings and anything else it writes in `/data/app-state`,
   which a deploy leaves alone.
 - Both login screens show the app's name, version and whether it's running, beside the slot and last update.

@@ -5,7 +5,7 @@ The flash tool writes them to applpi.json on the boot partition. When that file 
 data partition and deleted, so the Wi-Fi password doesn't stay on the FAT partition (only the key made from it is
 kept). The SSH host key can come with them (applpi keeps one per Pi, so a reflashed Pi keeps its identity); otherwise
 one is made. Then, at every boot, the hostname, time zone, Wi-Fi and SSH keys are set from the copy on the data
-partition.
+partition, with the time server if the app set one (app-request).
 The root filesystem is read-only with changes in RAM, so all of this is made again at each boot.
 """
 
@@ -28,6 +28,9 @@ USER = "applpi"
 
 HOSTNAME = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")
 COUNTRY = re.compile(r"[A-Z]{2}")
+# A time server: a host name or an IPv4 or IPv6 address (the app can change it: app-request ntp)
+SERVER = re.compile(r"[A-Za-z0-9]([A-Za-z0-9.:-]{0,251}[A-Za-z0-9])?")
+NTP_CONF = Path("/run/systemd/timesyncd.conf.d/applpi.conf")
 SSH_KEY = re.compile(
     r"(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com"
     r"|sk-ecdsa-sha2-nistp256@openssh\.com) [A-Za-z0-9+/]+=*( [^\r\n]*)?"
@@ -58,6 +61,12 @@ def check(raw: object) -> dict:
                 or not (ZONEINFO / timezone).is_file()):
             raise SettingsError(f"unknown time zone: {timezone}")
         settings["timezone"] = timezone
+
+    ntp = raw.get("ntp")
+    if ntp:
+        if not isinstance(ntp, str) or not SERVER.fullmatch(ntp):
+            raise SettingsError(f"ntp must be a time server's name or address: {ntp}")
+        settings["ntp"] = ntp
 
     wifi = raw.get("wifi")
     if wifi is not None:
@@ -140,6 +149,11 @@ def apply(settings: dict) -> None:
         link.unlink(missing_ok=True)
         link.symlink_to(ZONEINFO / timezone)
         os.replace(link, "/etc/localtime")
+
+    # Before timesyncd starts (this runs before sysinit.target)
+    ntp = settings.get("ntp")
+    if ntp and SERVER.fullmatch(ntp):
+        write(NTP_CONF, f"[Time]\nNTP={ntp}\n", 0o644)
 
     RUN_DIR.mkdir(mode=0o755, exist_ok=True)
     write(RUN_DIR / "authorized_keys" / USER, "\n".join(settings["ssh_keys"]) + "\n", 0o644)

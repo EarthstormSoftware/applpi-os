@@ -14,7 +14,10 @@ unloaded while it runs; for any other app (or none) it's loaded.
   app install <file>   installs an app from a .tar of its folder (its deploy.ps1 copies one here), replacing the one
                        there, then starts it and says whether it's running. A different app (another name) starts
                        with empty state.
-  app remove           stops the app and removes it and its state
+  app trial <file>     installs a new version of the app there (the same name), keeping the old one until the new
+                       one has kept running for 30 s, and otherwise putting the old one back. The app asks for this
+                       itself (app-request update); /data/app-state/update-result.json says how it went.
+  app remove          stops the app and removes it and its state
 """
 
 import json
@@ -41,8 +44,12 @@ NAME = re.compile(r"[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?")
 VERSION = re.compile(r"[A-Za-z0-9._+-]{1,32}")
 # A bad manifest: the service doesn't restart the app (EX_CONFIG, in RestartPreventExitStatus)
 BAD_MANIFEST = 78
-# How long a newly installed app must keep running
+# How long a newly installed app must keep running, and a new version installed on trial
 INSTALL_SECONDS = 10
+TRIAL_SECONDS = 30
+# How a trial went, for the app: {"version", "success", "message", "time"}
+RESULT = STATE / "update-result.json"
+APP_UID = 800
 
 
 class AppError(Exception):
@@ -125,10 +132,11 @@ def empty(folder):
             path.unlink()
 
 
-def install(archive):
-    new, old = APP.with_name("app.new"), APP.with_name("app.old")
+def unpack(archive):
+    """Unpacks an app's .tar beside /data/app (as app.new) and checks it: (folder, name, version)."""
+    new = APP.with_name("app.new")
     shutil.rmtree(new, ignore_errors=True)
-    shutil.rmtree(old, ignore_errors=True)
+    shutil.rmtree(APP.with_name("app.old"), ignore_errors=True)
     new.mkdir(mode=0o755)
     try:
         with tarfile.open(archive) as tar:
@@ -142,7 +150,26 @@ def install(archive):
     except (AppError, tarfile.TarError, OSError) as error:
         shutil.rmtree(new, ignore_errors=True)
         raise AppError(f"Not installed: {error}") from None
+    return new, name, version
 
+
+def start_and_check(seconds):
+    """Starts the app; None if it's still running after seconds (and hasn't restarted), or its last messages."""
+    systemctl("reset-failed", SERVICE, check=False)
+    started = int(time.time())
+    systemctl("start", SERVICE)
+    time.sleep(seconds)
+    state = dict(line.split("=", 1) for line in
+                 systemctl("show", "-p", "SubState", "-p", "NRestarts", SERVICE).stdout.splitlines() if "=" in line)
+    if state.get("SubState") == "running" and state.get("NRestarts") == "0":
+        return None
+    return subprocess.run(["journalctl", "-u", SERVICE, f"--since=@{started}", "-n", "20", "--no-pager", "-o", "cat"],
+                          capture_output=True, text=True).stdout.rstrip()
+
+
+def install(archive):
+    new, name, version = unpack(archive)
+    old = APP.with_name("app.old")
     try:
         previous = manifest(APP)[0] if APP.exists() else None
     except AppError:
@@ -158,18 +185,58 @@ def install(archive):
     say(f"Installed {name} {version}" + (f", replacing {previous} (its state is gone)" if previous not in (None, name) else ""))
 
     # It must start and keep running
-    systemctl("reset-failed", SERVICE, check=False)
-    started = int(time.time())
-    systemctl("start", SERVICE)
-    time.sleep(INSTALL_SECONDS)
-    state = dict(line.split("=", 1) for line in
-                 systemctl("show", "-p", "SubState", "-p", "NRestarts", SERVICE).stdout.splitlines() if "=" in line)
-    if state.get("SubState") == "running" and state.get("NRestarts") == "0":
+    log = start_and_check(INSTALL_SECONDS)
+    if log is None:
         say(f"{name} {version} is running")
         return
-    log = subprocess.run(["journalctl", "-u", SERVICE, f"--since=@{started}", "-n", "20", "--no-pager", "-o", "cat"],
-                         capture_output=True, text=True).stdout
-    raise AppError(f"{name} {version} didn't keep running. Its last messages:\n{log.rstrip()}")
+    raise AppError(f"{name} {version} didn't keep running. Its last messages:\n{log}")
+
+
+def report(version, success, message):
+    """Leaves how the trial went where the app can read it."""
+    RESULT.write_text(json.dumps({"version": version, "success": success, "message": message,
+                                  "time": int(time.time())}) + "\n", encoding="utf-8")
+    os.chown(RESULT, APP_UID, APP_UID)
+    RESULT.chmod(0o644)
+    os.sync()
+
+
+def trial(archive):
+    try:
+        new, name, version = unpack(archive)
+    except AppError as error:
+        report(None, False, str(error))
+        raise
+    try:
+        current, current_version, *_ = manifest(APP)
+    except AppError:
+        current = current_version = None
+    if name != current:
+        shutil.rmtree(new, ignore_errors=True)
+        message = f"Not installed: it's {name}, not {current} (a different app is installed with its deploy.ps1)."
+        report(version, False, message)
+        raise AppError(message)
+
+    old = APP.with_name("app.old")
+    systemctl("stop", SERVICE)
+    os.rename(APP, old)
+    os.rename(new, APP)
+    os.sync()
+    say(f"Trying {name} {version} (replacing {current_version})")
+    log = start_and_check(TRIAL_SECONDS)
+    if log is None:
+        shutil.rmtree(old)
+        os.sync()
+        say(f"{name} {version} is running: kept")
+        report(version, True, f"Updated to {version}.")
+        return
+    systemctl("stop", SERVICE)
+    shutil.rmtree(APP)
+    os.rename(old, APP)
+    os.sync()
+    say(f"{name} {version} didn't keep running: {current_version} is back. Its last messages:\n{log}")
+    report(version, False, f"{version} didn't keep running, so {current_version} is back. Its last messages:\n{log}")
+    start_and_check(0)
 
 
 def remove():
@@ -199,6 +266,11 @@ def main():
             run()
         elif len(args) == 2 and args[0] == "install":
             install(args[1])
+        elif len(args) == 2 and args[0] == "trial":
+            try:
+                trial(args[1])
+            finally:
+                Path(args[1]).unlink(missing_ok=True)  # app-request's copy, in /run
         elif args == ["remove"]:
             remove()
         else:

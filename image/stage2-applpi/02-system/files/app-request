@@ -1,0 +1,146 @@
+#!/usr/bin/python3
+"""What the app may ask of the OS, so its page can change what a Pico's can. The app user may run this, and nothing
+else, as root (sudo, in /etc/sudoers.d/020_applpi-app); each request is checked here.
+
+  app-request update            installs /data/app-state/update.tar as a new version of the app, on trial: in the
+                                background, as the app is restarted. If the new version doesn't keep running, the
+                                old one goes back. /data/app-state/update-result.json then says how it went.
+  app-request time-zone <name>  sets the time zone, such as Europe/London (kept on the data partition)
+  app-request ntp <server>      sets the time server ("" for Debian's)
+  app-request settings          prints {"time_zone", "ntp"} as JSON
+  app-request restart           restarts the Pi
+"""
+
+import json
+import os
+import re
+import stat
+import subprocess
+import sys
+from pathlib import Path
+
+SETTINGS = Path("/data/settings/device.json")
+UPDATE = Path("/data/app-state/update.tar")
+# The update is taken out of the app's reach before it's installed
+TAKEN = Path("/run/applpi/update.tar")
+UPDATE_UNIT = "applpi-app-update"
+ZONEINFO = Path("/usr/share/zoneinfo")
+NTP_CONF = Path("/run/systemd/timesyncd.conf.d/applpi.conf")
+# A host name or an IPv4 or IPv6 address
+SERVER = re.compile(r"[A-Za-z0-9]([A-Za-z0-9.:-]{0,251}[A-Za-z0-9])?")
+LARGEST_UPDATE = 64 * 1024 * 1024
+
+
+class RequestError(Exception):
+    pass
+
+
+def write(path, text, mode):
+    """Writes a file so that a power cut leaves either the old one or the new one."""
+    temp = path.with_name(path.name + ".tmp")
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+    os.fchmod(fd, mode)
+    with os.fdopen(fd, "w", encoding="utf-8") as file:
+        file.write(text)
+        file.flush()
+        os.fsync(file.fileno())
+    os.replace(temp, path)
+
+
+def write_bytes(path, data):
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as file:
+        file.write(data)
+
+
+def change_settings(key, value):
+    settings = json.loads(SETTINGS.read_text(encoding="utf-8"))
+    if value:
+        settings[key] = value
+    else:
+        settings.pop(key, None)
+    write(SETTINGS, json.dumps(settings, indent=2) + "\n", 0o600)
+
+
+def check_time_zone(name):
+    if not name or name.startswith("/") or ".." in name or not (ZONEINFO / name).is_file():
+        raise RequestError(f"Unknown time zone: {name}")
+
+
+def apply_time_zone(name):
+    link = Path("/etc/localtime.applpi")
+    link.unlink(missing_ok=True)
+    link.symlink_to(ZONEINFO / name)
+    os.replace(link, "/etc/localtime")
+
+
+def apply_ntp(server):
+    """The time server for timesyncd, from now (apply-settings does the same at each boot)."""
+    if server:
+        NTP_CONF.parent.mkdir(parents=True, exist_ok=True)
+        NTP_CONF.write_text(f"[Time]\nNTP={server}\n", encoding="utf-8")
+    else:
+        NTP_CONF.unlink(missing_ok=True)
+    subprocess.run(["systemctl", "restart", "systemd-timesyncd.service"], check=True)
+
+
+def update():
+    if subprocess.run(["systemctl", "is-active", "--quiet", UPDATE_UNIT]).returncode == 0:
+        raise RequestError("An update is already under way.")
+    # The app owns the folder, so the file is opened without following a link (to a file only root may read), and
+    # copied from what was opened
+    try:
+        fd = os.open(UPDATE, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        raise RequestError(f"There's no {UPDATE}.") from None
+    with os.fdopen(fd, "rb") as source:
+        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+            raise RequestError(f"{UPDATE} isn't a file.")
+        data = source.read(LARGEST_UPDATE + 1)
+    if len(data) > LARGEST_UPDATE:
+        raise RequestError("The update is too big.")
+    TAKEN.parent.mkdir(parents=True, exist_ok=True)
+    write_bytes(TAKEN, data)
+    UPDATE.unlink()
+    # Its own unit: restarting the app would end anything the app started
+    subprocess.run(["systemctl", "reset-failed", UPDATE_UNIT], capture_output=True)
+    subprocess.run(["systemd-run", f"--unit={UPDATE_UNIT}", "--collect", "--quiet",
+                    "/usr/lib/applpi/app", "trial", str(TAKEN)], check=True)
+    print("The update has started: the app restarts with it")
+
+
+def main():
+    args = sys.argv[1:]
+    try:
+        if args == ["update"]:
+            update()
+        elif len(args) == 2 and args[0] == "time-zone":
+            check_time_zone(args[1])
+            change_settings("timezone", args[1])
+            apply_time_zone(args[1])
+            print(f"Time zone: {args[1]}")
+        elif len(args) == 2 and args[0] == "ntp":
+            if args[1] and not SERVER.fullmatch(args[1]):
+                raise RequestError(f"Not a time server's name or address: {args[1]}")
+            change_settings("ntp", args[1])
+            apply_ntp(args[1])
+            print(f"Time server: {args[1] or 'the default'}")
+        elif args == ["settings"]:
+            settings = json.loads(SETTINGS.read_text(encoding="utf-8"))
+            print(json.dumps({"time_zone": settings.get("timezone"), "ntp": settings.get("ntp", "")}))
+        elif args == ["restart"]:
+            subprocess.run(["systemctl", "reboot"], check=True)
+        else:
+            print(__doc__, file=sys.stderr)
+            return 2
+    except RequestError as error:
+        print(error, file=sys.stderr)
+        return 1
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        print(f"Couldn't: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

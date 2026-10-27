@@ -44,8 +44,10 @@ done
 # The app (one per Pi, in /data/app), run by applpi-app.service as the app user, which can use the hardware: GPIO,
 # I2C and SPI by the udev rules, the display, touch and serial ports by Debian's groups. The user's ID is fixed, as
 # /data/app-state is the app's and outlasts OS updates (Debian gives out system IDs from 999 down).
-install -m 755 files/app "${ROOTFS_DIR}/usr/lib/applpi/"
+install -m 755 files/app files/app-request "${ROOTFS_DIR}/usr/lib/applpi/"
 install -m 644 files/applpi-app.service "${ROOTFS_DIR}/etc/systemd/system/"
+# What the app may ask the OS (app-request), as root by sudo, and only that
+install -m 440 files/sudoers-app "${ROOTFS_DIR}/etc/sudoers.d/020_applpi-app"
 install -m 644 files/99-applpi-hardware.rules "${ROOTFS_DIR}/etc/udev/rules.d/"
 
 # Logs in RAM

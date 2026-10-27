@@ -147,6 +147,18 @@ sudo_works() {
 	sudo -n true
 }
 
+# The app user may run app-request as root, and nothing else; it answers, and refuses what it shouldn't do
+app_requests() {
+	local rights
+	rights=$(sudo -n -l -U app | sed -n '/may run the following/,$p' | tail -n +2 | sed 's/^ *//')
+	[ "$rights" = "(root) NOPASSWD: /usr/lib/applpi/app-request" ] || { echo "the app user may run: $rights"; return 1; }
+	sudo -n -u app sudo -n /usr/lib/applpi/app-request settings | grep -q '"time_zone"' || return 1
+	if sudo -n -u app sudo -n /usr/lib/applpi/app-request time-zone ../../etc/shadow 2> /dev/null; then
+		echo "app-request took a path for a time zone"; return 1
+	fi
+	[ "$(systemctl show -p NotifyAccess --value applpi-app)" = main ] || { echo "the app can't ask for a watchdog"; return 1; }
+}
+
 echo
 echo "== Checks"
 result=0
@@ -174,4 +186,5 @@ check login_screens "login screens show the slot and the app"
 check app "the app runs and answers (if there is one)"
 check libraries "the libraries for apps import, audio as the app needs"
 check sudo_works "sudo works for the admin user"
+check app_requests "the app may ask app-request, and only that"
 exit $result

@@ -15,6 +15,9 @@ Environment=PYTHONPATH=/data/app/lib PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=
 Environment=APPLPI_STATE=/data/app-state HOME=/data/app-state
 Restart=always
 RestartSec=5
+# The app can ask for systemd's watchdog itself (WATCHDOG_USEC=, then WATCHDOG=1 while it's well, as App Base does),
+# so a hung app is restarted, not only one that stops; an app that doesn't ask has none
+NotifyAccess=main
 RestartPreventExitStatus=78
 
 [Install]
