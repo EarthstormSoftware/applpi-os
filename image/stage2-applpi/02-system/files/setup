@@ -3,8 +3,10 @@
 
 apply-settings starts setup mode (/run/applpi/setup, which runs this as applpi-setup.service):
   - when the Pi has no settings: until it's set up. The page is on the ApplPi-SETUP hotspot and on Ethernet.
-  - when the Wi-Fi check asked for it (Wi-Fi didn't connect): for 10 minutes, on the hotspot only, and then the Pi
-    restarts with the settings it has.
+  - when the Wi-Fi check asked for it (Wi-Fi didn't connect): for 10 minutes (the Wi-Fi fallback's for_minutes), on
+    the hotspot only, and then the Pi restarts with the settings it has.
+  - when the app asked for it (app-request setup: to rename the Pi, or change its Wi-Fi or keys): the same, but on
+    Ethernet too, as a wired Pi has no other way to the page.
 
 The page is HTTPS, with a certificate made the first time (kept on the data partition), so nothing sent on the open
 hotspot can be read by anyone listening. Its fingerprint is on the console, to check against the browser's. Plain
@@ -285,9 +287,13 @@ class Handler(BaseHTTPRequestHandler):
         country = form.get("country") or wifi.get("country") or zone_countries.get(zone, "GB")
         networks = setup.networks + ([wifi["ssid"]] if wifi and wifi["ssid"] not in setup.networks else [])
         keys = form.get("keys") or ("keep" if current else "paste")
-        reason = ("This Pi has no settings yet." if not self.state.current
-                  else f"Wi-Fi didn't connect, so the Pi is in setup mode for {setup.minutes} minutes, then it tries "
-                       "again.")
+        reason = {
+            "no-settings": "This Pi has no settings yet.",
+            "wifi": f"Wi-Fi didn't connect, so the Pi is in setup mode for {setup.minutes} minutes, then it tries "
+                    "again.",
+            "asked": f"Setup mode was asked for from the app's page. In {setup.minutes} minutes, unless you save, the "
+                     "Pi restarts with the settings it has.",
+        }.get(setup.reason, "")
         fallback = settings_rules.wifi_fallback(current)
         if "fallback_after" in form:
             fallback = {"enabled": "fallback_enabled" in form, "after_minutes": form["fallback_after"],
@@ -508,8 +514,8 @@ def main():
     setup = Setup(SETUP.read_text().strip())
     fingerprint = certificate()
     Handler.state, Handler.fingerprint = setup, fingerprint
-    # Without settings, on Ethernet too; when Wi-Fi didn't connect, on the hotspot only
-    everywhere = setup.current is None
+    # Without settings or when the app asked, on Ethernet too; when Wi-Fi didn't connect, on the hotspot only
+    everywhere = setup.current is None or setup.reason == "asked"
     address = "0.0.0.0" if everywhere else ADDRESS
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(CERTIFICATE, CERTIFICATE_KEY)

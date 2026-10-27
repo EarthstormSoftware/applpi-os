@@ -9,8 +9,9 @@ partition, with the time server if the app set one (app-request).
 The root filesystem is read-only with changes in RAM, so all of this is made again at each boot.
 
 Without settings, the Pi starts in setup mode (/usr/lib/applpi/setup): Wi-Fi runs the ApplPi-SETUP hotspot instead,
-for the setup page. The Wi-Fi check (wifi-check) asks for setup mode at the next boot when Wi-Fi didn't connect; then
-the Pi's other settings (its name, SSH keys) still apply.
+for the setup page. The Wi-Fi check (wifi-check) asks for setup mode at the next boot when Wi-Fi didn't connect, and
+the app can ask for it (app-request setup, to rename the Pi or change its Wi-Fi or keys); then the Pi's other settings
+(its name, SSH keys) still apply.
 """
 
 import hashlib
@@ -29,9 +30,11 @@ HOST_KEY = Path("/data/ssh/ssh_host_ed25519_key")
 RUN_DIR = Path("/run/applpi")
 ZONEINFO = Path("/usr/share/zoneinfo")
 USER = "applpi"
-# Setup mode: this boot (holding why), and asked for the next boot
+# Setup mode: this boot (holding why: one of SETUP_REASONS), and asked for the next boot (holding who asked: the app
+# writes "asked", the Wi-Fi check nothing)
 SETUP = RUN_DIR / "setup"
 SETUP_NEXT = Path("/data/settings/setup-next")
+SETUP_REASONS = ("no-settings", "wifi", "asked")
 SETUP_SSID = "ApplPi-SETUP"
 SETUP_ADDRESS = "192.168.4.1"
 # Sorts before 20-wireless.network, so it's the one networkd uses for wlan0
@@ -262,14 +265,15 @@ def main() -> int:
 
     if not SETTINGS.exists():
         socket.sethostname(default_hostname())
-        start_setup_mode("no settings", None)
+        start_setup_mode("no-settings", None)
         return 0
     settings = json.loads(SETTINGS.read_text(encoding="utf-8"))
     if SETUP_NEXT.exists():
         # Once: the next boot tries Wi-Fi again, unless the Wi-Fi check asks again
+        reason = "asked" if SETUP_NEXT.read_text(errors="replace").strip() == "asked" else "wifi"
         SETUP_NEXT.unlink()
         os.sync()
-        start_setup_mode("Wi-Fi didn't connect", (settings.get("wifi") or {}).get("country"))
+        start_setup_mode(reason, (settings.get("wifi") or {}).get("country"))
     apply(settings)
     return 0
 

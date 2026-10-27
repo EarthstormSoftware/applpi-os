@@ -12,6 +12,11 @@ else, as root (sudo, in /etc/sudoers.d/020_applpi-app); each request is checked 
                                 for how long (from the next start)
   app-request settings          prints {"time_zone", "ntp", "wifi_fallback"} as JSON
   app-request restart           restarts the Pi
+  app-request setup             restarts the Pi into setup mode, keeping its settings until new ones are saved there
+                                (to rename it, or change its Wi-Fi or SSH keys)
+  app-request factory-reset     forgets the Pi's settings (name, Wi-Fi, SSH keys, time zone) and restarts it into
+                                setup mode, as a new Pi. Its SSH host key stays, and the app and its state: resetting
+                                those is the app's own reset.
 """
 
 import importlib.util
@@ -153,6 +158,15 @@ def main():
             print(json.dumps({"time_zone": settings.get("timezone"), "ntp": settings.get("ntp", ""),
                               "wifi_fallback": settings_rules().wifi_fallback(settings)}))
         elif args == ["restart"]:
+            subprocess.run(["systemctl", "reboot"], check=True)
+        elif args == ["setup"]:
+            write(settings_rules().SETUP_NEXT, "asked\n", 0o600)
+            subprocess.run(["systemctl", "reboot"], check=True)
+        elif args == ["factory-reset"]:
+            rules = settings_rules()
+            rules.SETUP_NEXT.unlink(missing_ok=True)
+            SETTINGS.unlink(missing_ok=True)
+            os.sync()
             subprocess.run(["systemctl", "reboot"], check=True)
         else:
             print(__doc__, file=sys.stderr)

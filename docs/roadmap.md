@@ -332,8 +332,11 @@ with `applpi.json` skips setup mode.
 - The QEMU test has a setup-mode run (`test-qemu.ps1 -Setup`): a card with no settings, set up from its page over
   the network, then booted on those settings and checked, trusting only the host key the page gave. Passed
   (2026-10-27). `app-request wifi-fallback` checked on the Pi: refused out of range, and used at the next start.
-- Still to do: renaming and a factory reset for apps (an `app-request` to restart into setup mode), a real phone on
-  the hotspot (its sign-in page and the certificate warning), and the README.
+- For apps (App Base's rename and factory reset): `app-request setup` restarts into setup mode keeping the settings
+  (as the Wi-Fi fallback does, but with the page on Ethernet too, for wired Pis), and `app-request factory-reset`
+  forgets them (name, Wi-Fi, keys, time zone) and restarts as a new Pi. The host key stays, and the app and its
+  state (resetting those is the app's own reset). Checked in a container; App Base still has to offer them.
+- Still to do: a real phone on the hotspot (its sign-in page and the certificate warning), and the README.
 
 ## Then
 
