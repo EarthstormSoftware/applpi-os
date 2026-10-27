@@ -158,12 +158,33 @@ from the card's disk ID and the slot's partition (`-02` for A, `-03` for B).
 - While developing, changes are tried on the test Pi first (temporarily writable), then put into the build, so a
   new image is built for a batch of working changes rather than for each one.
 
-### Tools on Windows
+### Tools on Windows (and Linux)
 
 `applpi`, a .NET command line: list USB card readers (removable disks only, with their size and name, and a
 confirmation before writing), download a release image and check it, write it, add `applpi.json`, and update a Pi's
-OS over SSH. A small WinUI app for flashing, on the same code, comes once the steps are settled. Writing the card
+OS over SSH. A small app for flashing, on the same code, comes once the steps are settled. Writing the card
 needs admin rights; nothing else does.
+
+Linux too (assessed 2026-10-27, about 2 to 3 days, most of it flashing and testing it): most of `applpi` is plain
+.NET 10 and already runs there. `update` and `forget` only use OpenSSH, `%APPDATA%` becomes `~/.config`, and the
+PowerShell scripts run on `pwsh` with Docker native (they may need path fixes or short `.sh` versions). What is
+Windows-only, about 300 of the tool's 1,600 lines:
+
+- Listing card readers (WMI): `lsblk --json` instead (removable or USB, size, model, mount points), with the same
+  rules (no system disk, confirmation before writing).
+- Writing the card (`\\.\PhysicalDriveN`, locking and dismounting volumes, kernel32): unmount the card's
+  partitions, write `/dev/sdX`, sync, and have the kernel re-read the partition table.
+- Admin rights (UAC): `flash` runs with, or re-runs itself with, `sudo`.
+- The boot partition after writing (Windows gives it a drive letter): mount it (`udisksctl` on a desktop, or a
+  temporary mount).
+- Wi-Fi passwords and host keys (DPAPI): a file only the user can read (as `~/.ssh`), or the desktop's keyring
+  (`secret-tool`).
+- `net10.0-windows` becomes `net10.0`, with Windows and Linux versions of the parts above.
+
+Testing it needs a Linux machine with a card reader (WSL2 doesn't see USB card readers without `usbipd`). macOS
+would be about as much again (`diskutil`, `/dev/rdiskN`, the Keychain). Best done before v1 and before the flash
+app (step 5), so the app is chosen once, and alongside published images, so a release can be downloaded and
+flashed on either without Docker.
 
 ## Steps
 
@@ -216,7 +237,8 @@ image.
 
 ### 5. Flash app
 
-The WinUI flashing app.
+The flashing app: WinUI if it's for Windows only, [Avalonia](https://avaloniaui.net) (also .NET, on Windows,
+Linux and macOS) if `applpi` goes to Linux too (see Tools on Windows and Linux).
 
 ### 6. Check the test Pi
 
