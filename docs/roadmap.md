@@ -336,7 +336,7 @@ with `applpi.json` skips setup mode.
   (as the Wi-Fi fallback does, but with the page on Ethernet too, for wired Pis), and `app-request factory-reset`
   forgets them (name, Wi-Fi, keys, time zone) and restarts as a new Pi. The host key stays, and the app and its
   state (resetting those is the app's own reset). Checked in a container; App Base still has to offer them.
-- Still to do: a real phone on the hotspot (its sign-in page and the certificate warning), and the README.
+- Still to do: a real phone on the hotspot (its sign-in page and the certificate warning).
 
 ## Then
 
