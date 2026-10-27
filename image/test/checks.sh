@@ -133,6 +133,8 @@ except OSError as error:
 # The compiled libraries for apps import, and the onboard audio is loaded unless the app uses the PWM hardware
 libraries() {
 	python3 -c 'import rpi_ws281x' || return 1
+	# QEMU's machine has no Pi audio hardware, so the driver can't load there
+	[ "$mode" = qemu ] && return 0
 	local pwm loaded
 	pwm=$(python3 -c 'import json; print(json.load(open("/data/app/app.json")).get("pwm", False))' 2> /dev/null)
 	loaded=$(lsmod | grep -c '^snd_bcm2835 ')
