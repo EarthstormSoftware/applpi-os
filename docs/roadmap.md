@@ -298,7 +298,10 @@ with `applpi.json` skips setup mode.
 - Probably no new packages: `wpa_supplicant` can run the hotspot and `systemd-networkd` has a DHCP server. The setup
   page is a small Python server that runs only in setup mode, so the rule on what listens holds the rest of the
   time.
-- First: check the Pi 2's Wi-Fi dongle can run a hotspot (its driver usually can), on the test Pi.
+- Checked first (2026-10-27, the test Pi): the official Raspberry Pi Wi-Fi dongle (BCM43143, `brcmfmac`) runs a
+  hotspot. `iw list` gives AP mode, and AP alongside a normal connection on one channel. With `wpa_supplicant`
+  (`mode=2`, open) and a `systemd-networkd` DHCP server on 192.168.4.1/24, all already in the image, another Pi
+  saw it (-56 dBm), joined, got an address in 4 s and loaded the page on port 80. The normal Wi-Fi came back after.
 - With this, the Linux side of `applpi` may only need `update`, which is plain SSH (see Tools on Windows and Linux).
 
 ## Then
