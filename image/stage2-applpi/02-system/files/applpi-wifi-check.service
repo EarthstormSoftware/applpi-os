@@ -1,0 +1,13 @@
+[Unit]
+Description=ApplPi Wi-Fi check: setup mode if Wi-Fi doesn't connect
+After=applpi-settings.service systemd-networkd.service wpa_supplicant@wlan0.service
+ConditionPathExists=/run/applpi/wpa_supplicant-wlan0.conf
+ConditionPathExists=!/run/applpi/setup
+
+[Service]
+# Not oneshot, so it doesn't hold up the system reaching "running" while it waits
+Type=simple
+ExecStart=/usr/lib/applpi/wifi-check
+
+[Install]
+WantedBy=multi-user.target

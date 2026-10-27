@@ -7,6 +7,10 @@ kept). The SSH host key can come with them (applpi keeps one per Pi, so a reflas
 one is made. Then, at every boot, the hostname, time zone, Wi-Fi and SSH keys are set from the copy on the data
 partition, with the time server if the app set one (app-request).
 The root filesystem is read-only with changes in RAM, so all of this is made again at each boot.
+
+Without settings, the Pi starts in setup mode (/usr/lib/applpi/setup): Wi-Fi runs the ApplPi-SETUP hotspot instead,
+for the setup page. The Wi-Fi check (wifi-check) asks for setup mode at the next boot when Wi-Fi didn't connect; then
+the Pi's other settings (its name, SSH keys) still apply.
 """
 
 import hashlib
@@ -25,6 +29,14 @@ HOST_KEY = Path("/data/ssh/ssh_host_ed25519_key")
 RUN_DIR = Path("/run/applpi")
 ZONEINFO = Path("/usr/share/zoneinfo")
 USER = "applpi"
+# Setup mode: this boot (holding why), and asked for the next boot
+SETUP = RUN_DIR / "setup"
+SETUP_NEXT = Path("/data/settings/setup-next")
+SETUP_SSID = "ApplPi-SETUP"
+SETUP_ADDRESS = "192.168.4.1"
+# Sorts before 20-wireless.network, so it's the one networkd uses for wlan0
+SETUP_NETWORK = Path("/run/systemd/network/05-setup.network")
+SERIAL = Path("/proc/device-tree/serial-number")
 
 HOSTNAME = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")
 COUNTRY = re.compile(r"[A-Z]{2}")
@@ -159,7 +171,7 @@ def apply(settings: dict) -> None:
     write(RUN_DIR / "authorized_keys" / USER, "\n".join(settings["ssh_keys"]) + "\n", 0o644)
 
     wifi = settings.get("wifi")
-    if wifi:
+    if wifi and not SETUP.exists():
         write(RUN_DIR / "wpa_supplicant-wlan0.conf",
               f"country={wifi['country']}\n"
               "ctrl_interface=/run/wpa_supplicant\n"
@@ -168,6 +180,45 @@ def apply(settings: dict) -> None:
               f"\tpsk={wifi['psk']}\n"
               "}\n",
               0o600)
+
+
+def default_hostname() -> str:
+    """applpi-<the last 4 digits of the Pi's serial number>, for setup mode on a Pi with no name yet."""
+    serial = SERIAL.read_bytes().strip(b"\0").decode(errors="replace").lower() if SERIAL.exists() else ""
+    serial = re.sub(r"[^0-9a-f]", "", serial)
+    return f"applpi-{serial[-4:]}" if serial else "applpi"
+
+
+def start_setup_mode(reason: str, country: str | None) -> None:
+    """Wi-Fi runs the open ApplPi-SETUP hotspot, with a DHCP server, for the setup page (applpi-setup.service)."""
+    write(SETUP, reason + "\n", 0o644)
+    write(RUN_DIR / "wpa_supplicant-wlan0.conf",
+          (f"country={country}\n" if country else "") +
+          "ctrl_interface=/run/wpa_supplicant\n"
+          "network={\n"
+          f"\tssid=\"{SETUP_SSID}\"\n"
+          "\tmode=2\n"
+          "\tfrequency=2412\n"
+          "\tkey_mgmt=NONE\n"
+          "}\n",
+          0o600)
+    write(SETUP_NETWORK,
+          "[Match]\n"
+          "Name=wlan0\n"
+          "\n"
+          "[Network]\n"
+          f"Address={SETUP_ADDRESS}/24\n"
+          "DHCPServer=yes\n"
+          "ConfigureWithoutCarrier=yes\n"
+          "LLMNR=no\n"
+          "MulticastDNS=no\n"
+          "\n"
+          "[DHCPServer]\n"
+          "PoolOffset=10\n"
+          "PoolSize=40\n"
+          f"DNS={SETUP_ADDRESS}\n",
+          0o644)
+    print(f"Setup mode ({reason}): join {SETUP_SSID} for the setup page", file=sys.stderr)
 
 
 def main() -> int:
@@ -179,9 +230,16 @@ def main() -> int:
         subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "", "-f", str(HOST_KEY)], check=True)
 
     if not SETTINGS.exists():
-        print("No settings: put applpi.json on the boot partition", file=sys.stderr)
-        return 1
-    apply(json.loads(SETTINGS.read_text(encoding="utf-8")))
+        socket.sethostname(default_hostname())
+        start_setup_mode("no settings", None)
+        return 0
+    settings = json.loads(SETTINGS.read_text(encoding="utf-8"))
+    if SETUP_NEXT.exists():
+        # Once: the next boot tries Wi-Fi again, unless the Wi-Fi check asks again
+        SETUP_NEXT.unlink()
+        os.sync()
+        start_setup_mode("Wi-Fi didn't connect", (settings.get("wifi") or {}).get("country"))
+    apply(settings)
     return 0
 
 

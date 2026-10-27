@@ -23,3 +23,6 @@ obj/
 .idea/
 *.swp
 *~
+
+# Python (checking the image's scripts)
+__pycache__/

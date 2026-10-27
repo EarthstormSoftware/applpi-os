@@ -9,7 +9,8 @@
 #                                 A service failed to start: example.service
 #   slot app      the app, as a labelled line in colour (and its error on the next line, if it couldn't start):
 #                   App           hello 1.0.0, running
-#   slot issue    writes the console's /etc/issue from its template with all three
+#   slot issue    writes the console's /etc/issue from its template with all three, and in setup mode how to reach
+#                 the setup page (from /run/applpi/setup-console)
 #   slot refresh  writes /etc/issue and has the console redraw it (when the slot or the app changes)
 set -eu
 
@@ -84,13 +85,15 @@ app() {
 # The console's text, indented by two; without backslashes (agetty's escapes)
 issue() {
 	orange=$(printf '\033[33m')
-	SLOT=$slot UPDATE=$(last_update | tr -d '\\') APP=$(app | tr -d '\\') awk '
+	SLOT=$slot UPDATE=$(last_update | tr -d '\\') APP=$(app | tr -d '\\') \
+	SETUP=$(cat /run/applpi/setup-console 2> /dev/null | tr -d '\\') awk '
 		function block(name,    n, i, lines) {
 			n = split(ENVIRON[name], lines, "\n")
 			for (i = 1; i <= n; i++) if (lines[i] != "") print "  " lines[i]
 		}
 		index($0, "@UPDATE@") { block("UPDATE"); next }
 		index($0, "@APP@") { block("APP"); next }
+		index($0, "@SETUP@") { block("SETUP"); next }
 		(at = index($0, "@SLOT@")) { $0 = substr($0, 1, at - 1) ENVIRON["SLOT"] substr($0, at + 6) }
 		{ print }' /usr/share/applpi/issue > /etc/issue
 }

@@ -31,6 +31,11 @@ install -d "${ROOTFS_DIR}/usr/lib/applpi"
 install -m 755 files/mount-data files/apply-settings files/os-update "${ROOTFS_DIR}/usr/lib/applpi/"
 install -m 644 files/applpi-data.service files/applpi-settings.service "${ROOTFS_DIR}/etc/systemd/system/"
 
+# Setup mode: without settings (or when Wi-Fi didn't connect, by the Wi-Fi check), Wi-Fi runs the ApplPi-SETUP
+# hotspot and the setup page runs instead of the app
+install -m 755 files/setup files/wifi-check "${ROOTFS_DIR}/usr/lib/applpi/"
+install -m 644 files/applpi-setup.service files/applpi-wifi-check.service "${ROOTFS_DIR}/etc/systemd/system/"
+
 # OS updates: a trial boot is kept once it's healthy, and otherwise (including a hang, by the hardware watchdog, or
 # emergency mode) the Pi restarts into the permanent slot
 install -m 644 files/applpi-os-check.service "${ROOTFS_DIR}/etc/systemd/system/"
@@ -76,7 +81,7 @@ on_chroot <<- EOF
 	groupadd --system --gid 800 app
 	useradd --system --uid 800 --gid app --groups gpio,i2c,spi,video,input,dialout --home-dir /data/app-state \
 		--no-create-home --shell /usr/sbin/nologin app
-	systemctl enable applpi-data.service applpi-settings.service applpi-os-check.service applpi-app.service systemd-networkd.service wpa_supplicant@wlan0.service ssh.service avahi-daemon.service
+	systemctl enable applpi-data.service applpi-settings.service applpi-os-check.service applpi-app.service applpi-setup.service applpi-wifi-check.service systemd-networkd.service wpa_supplicant@wlan0.service ssh.service avahi-daemon.service
 	# Only wlan0's: the D-Bus one was still enabled in the image after this disable, so it's masked, its D-Bus name too
 	systemctl disable wpa_supplicant.service
 	systemctl mask wpa_supplicant.service

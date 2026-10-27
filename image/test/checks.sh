@@ -95,10 +95,11 @@ watchdog() {
 	[ "$(cat /sys/class/watchdog/watchdog0/state 2>/dev/null)" = active ] || { echo "the hardware watchdog isn't active"; return 1; }
 }
 
-# Only the services an ApplPi needs are running (and the update check, on a trial boot, and the SSH user's session)
+# Only the services an ApplPi needs are running (and the update check, on a trial boot, the Wi-Fi check in the first
+# minutes, and the SSH user's session)
 services() {
 	systemctl list-units --type=service --state=running --no-legend --plain | awk '{ print $1 }' | grep -vxE \
-		'applpi-(app|console-logo|os-check)\.service|avahi-daemon\.service|dbus\.service|(serial-)?getty@tty(1|AMA0)\.service|ssh\.service|systemd-(journald|logind|networkd|resolved|timesyncd|udevd|hostnamed)\.service|user@[0-9]+\.service|wpa_supplicant@wlan0\.service' \
+		'applpi-(app|console-logo|os-check|wifi-check)\.service|avahi-daemon\.service|dbus\.service|(serial-)?getty@tty(1|AMA0)\.service|ssh\.service|systemd-(journald|logind|networkd|resolved|timesyncd|udevd|hostnamed)\.service|user@[0-9]+\.service|wpa_supplicant@wlan0\.service' \
 		&& return 1 || return 0
 }
 

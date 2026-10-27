@@ -303,6 +303,28 @@ with `applpi.json` skips setup mode.
   (`mode=2`, open) and a `systemd-networkd` DHCP server on 192.168.4.1/24, all already in the image, another Pi
   saw it (-56 dBm), joined, got an address in 4 s and loaded the page on port 80. The normal Wi-Fi came back after.
 - With this, the Linux side of `applpi` may only need `update`, which is plain SSH (see Tools on Windows and Linux).
+- Built (2026-10-27), with no new packages:
+  - `apply-settings` starts setup mode when there are no settings, or once when `/data/settings/setup-next` asks.
+    It writes the hotspot's `wpa_supplicant` configuration and `/run/systemd/network/05-setup.network` (which comes
+    before `20-wireless.network`), so nothing extra is enabled the rest of the time. The app doesn't start in setup
+    mode, as the page has port 80.
+  - `/usr/lib/applpi/setup` (`applpi-setup.service`, Python's standard library) serves the page over HTTPS on 443,
+    with the certificate made by `openssl` and kept in `/data/setup`. Port 80 says where the page is, with the
+    fingerprint. On the hotspot, a captive DNS sends every name to the Pi, so phones show their sign-in page. The
+    fingerprint is on the console, and the ACT LED blinks. The settings are checked by `apply-settings`' own rules.
+  - Without settings, setup mode stays on until the Pi is set up (restarting it couldn't help), and the page is on
+    Ethernet too, at `https://applpi-<last 4 digits of the serial>.local/`. When Wi-Fi didn't connect, it's on the
+    hotspot only, for 10 minutes (more while the page is in use), keeping the name, keys and an empty password's
+    Wi-Fi key, then the Pi restarts on its settings.
+  - `wifi-check` (`applpi-wifi-check.service`): with Wi-Fi settings but no routable network 5 minutes after
+    starting, it writes `setup-next` and restarts. Not on a trial boot, which goes back instead.
+- Checked on the Pi 2 (2026-10-27): a normal boot (all checks; the Wi-Fi check stops once Wi-Fi is up), the Wi-Fi
+  check's fallback (made to time out), and setup mode from another Pi joining the hotspot: an address by DHCP, the
+  captive DNS, port 80, the certificate matching the fingerprint shown, the scan for networks while the hotspot
+  runs, and back on its own Wi-Fi after 10 minutes. Then the form sent back as filled in (an empty password, the
+  keys kept): saved, the host key's fingerprint and `known_hosts` line shown, and restarted on its settings.
+- Still to do: a card with no settings in the QEMU test (setup over Ethernet), and renaming and a factory reset for
+  apps (an `app-request` to restart into setup mode).
 
 ## Then
 

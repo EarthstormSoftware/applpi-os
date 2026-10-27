@@ -3,6 +3,8 @@ Description=ApplPi app (in /data/app)
 Requires=applpi-data.service
 After=applpi-data.service applpi-settings.service network.target
 ConditionPathExists=/data/app/main.py
+# Not in setup mode: the setup page has port 80
+ConditionPathExists=!/run/applpi/setup
 # Restarted however often it stops, like a Pico's watchdog restarting it
 StartLimitIntervalSec=0
 

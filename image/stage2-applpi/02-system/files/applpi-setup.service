@@ -1,0 +1,12 @@
+[Unit]
+Description=ApplPi setup mode: the setup page
+After=applpi-settings.service systemd-networkd.service
+ConditionPathExists=/run/applpi/setup
+
+[Service]
+ExecStart=/usr/lib/applpi/setup
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

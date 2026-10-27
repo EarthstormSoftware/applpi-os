@@ -53,4 +53,4 @@ chmod -x "${ROOTFS_DIR}/etc/update-motd.d/10-uname" "${ROOTFS_DIR}/etc/update-mo
 install -m 755 files/slot "${ROOTFS_DIR}/usr/lib/applpi/"
 . "${ROOTFS_DIR}/etc/applpi-release"
 sed "s/@VERSION@/${VERSION}/; s/@BUILD_STAMP@/${BUILD_STAMP}/" files/issue > "${ROOTFS_DIR}/usr/share/applpi/issue"
-sed "s/@SLOT@/unknown/; /@UPDATE@/d; /@APP@/d" "${ROOTFS_DIR}/usr/share/applpi/issue" > "${ROOTFS_DIR}/etc/issue"
+sed "s/@SLOT@/unknown/; /@UPDATE@/d; /@APP@/d; /@SETUP@/d" "${ROOTFS_DIR}/usr/share/applpi/issue" > "${ROOTFS_DIR}/etc/issue"
