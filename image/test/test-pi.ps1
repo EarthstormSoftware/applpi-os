@@ -42,7 +42,7 @@ New-Item -ItemType Directory -Force $results | Out-Null
 
 if (-not $NoUpdate) {
     if (-not $Image) {
-        $Image = Get-ChildItem $deploy -Filter 'applpi-os-*.img.xz' | Where-Object Name -notlike '*-broken.img.xz' |
+        $Image = Get-ChildItem $deploy -Filter 'applpi-os-*.img.xz' | Where-Object Name -notlike '*-broken*.img.xz' |
             Sort-Object LastWriteTime | Select-Object -Last 1 -ExpandProperty FullName
         if (-not $Image) { throw "No image in ${deploy}: build one with image\build.ps1" }
     }
