@@ -2,11 +2,13 @@
 """The app: one per Pi, like a Pico's firmware. It lives in /data/app and starts at main.py, with its pure-Python
 libraries in lib/, and keeps what it writes (settings and so on) in /data/app-state. Its manifest, app.json:
 
-  {"name": "hello", "version": "1.0.0", "root": false}
+  {"name": "hello", "version": "1.0.0", "root": false, "pwm": false}
 
 name: lowercase letters, digits and hyphens; version: what the login screens show; root (optional): run as root, for
 libraries that need it (rpi_ws281x). Otherwise it runs as the app user, with the hardware groups (GPIO, I2C, SPI,
-video, input, serial) and the right to use ports below 1024 (its web page is on port 80).
+video, input, serial) and the right to use ports below 1024 (its web page is on port 80). pwm (optional): it uses
+the PWM hardware (WS2812 LEDs on GPIO 18, by rpi_ws281x), which the onboard audio also uses, so the audio driver is
+unloaded while it runs; for any other app (or none) it's loaded.
 
   app run              applpi-app.service: runs the app (the service restarts it if it stops)
   app install <file>   installs an app from a .tar of its folder (its deploy.ps1 copies one here), replacing the one
@@ -32,7 +34,9 @@ STATE = Path("/data/app-state")
 INFO = Path("/run/applpi/app")
 SERVICE = "applpi-app.service"
 USER = "app"
-KEYS = {"name", "version", "root"}
+KEYS = {"name", "version", "root", "pwm"}
+# The onboard (headphone) audio's driver, which uses the PWM hardware
+AUDIO_MODULE = "snd_bcm2835"
 NAME = re.compile(r"[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?")
 VERSION = re.compile(r"[A-Za-z0-9._+-]{1,32}")
 # A bad manifest: the service doesn't restart the app (EX_CONFIG, in RestartPreventExitStatus)
@@ -50,7 +54,7 @@ def say(message):
 
 
 def manifest(folder):
-    """The app in a folder: (name, version, root), from its app.json."""
+    """The app in a folder: (name, version, root, pwm), from its app.json."""
     if not (folder / "main.py").is_file():
         raise AppError("There's no main.py.")
     try:
@@ -63,28 +67,42 @@ def manifest(folder):
         raise AppError("app.json isn't a JSON object.")
     if unknown := set(data) - KEYS:
         raise AppError(f"app.json has settings ApplPi OS doesn't know: {', '.join(sorted(unknown))}.")
-    name, version, root = data.get("name"), data.get("version"), data.get("root", False)
+    name, version = data.get("name"), data.get("version")
+    root, pwm = data.get("root", False), data.get("pwm", False)
     if not isinstance(name, str) or not NAME.fullmatch(name):
         raise AppError("app.json's name must be lowercase letters, digits and hyphens, up to 32.")
     if not isinstance(version, str) or not VERSION.fullmatch(version):
         raise AppError("app.json's version must be letters, digits, dots, hyphens, + or _, up to 32.")
     if not isinstance(root, bool):
         raise AppError("app.json's root must be true or false.")
-    return name, version, root
+    if not isinstance(pwm, bool):
+        raise AppError("app.json's pwm must be true or false.")
+    return name, version, root, pwm
 
 
 def refresh_screens():
     subprocess.run(["/usr/lib/applpi/slot", "refresh"], check=False)
 
 
+def audio(on):
+    """Loads the onboard audio's driver, or unloads it so an app can have the PWM hardware."""
+    command = ["modprobe", AUDIO_MODULE] if on else ["modprobe", "--remove", AUDIO_MODULE]
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode != 0:
+        say(f"Couldn't {'load' if on else 'unload'} {AUDIO_MODULE}: {result.stderr.strip()}")
+    return result.returncode == 0
+
+
 def run():
     INFO.parent.mkdir(parents=True, exist_ok=True)
     try:
-        name, version, root = manifest(APP)
+        name, version, root, pwm = manifest(APP)
     except AppError as error:
         INFO.write_text(f"APP_ERROR={shlex.quote(str(error))}\n")
         say(f"Not starting the app: {error}")
         sys.exit(BAD_MANIFEST)
+    if not audio(not pwm) and pwm:
+        sys.exit(1)
     INFO.write_text(f"APP_NAME={name}\nAPP_VERSION={version}\n")
     refresh_screens()
     command = ["/usr/bin/python3", "main.py"]
@@ -120,7 +138,7 @@ def install(archive):
             if not path.is_symlink():
                 os.chown(path, 0, 0)
                 path.chmod(0o755 if path.is_dir() else 0o644)
-        name, version, _ = manifest(new)
+        name, version, *_ = manifest(new)
     except (AppError, tarfile.TarError, OSError) as error:
         shutil.rmtree(new, ignore_errors=True)
         raise AppError(f"Not installed: {error}") from None
@@ -170,6 +188,7 @@ def remove():
     empty(STATE)
     INFO.unlink(missing_ok=True)
     os.sync()
+    audio(True)
     refresh_screens()
 
 

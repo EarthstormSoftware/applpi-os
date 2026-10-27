@@ -123,7 +123,11 @@ from the card's disk ID and the slot's partition (`-02` for A, `-03` for B).
 - A small manifest, `app.json`: name, version and whether it needs root (`rpi_ws281x` does). Otherwise it runs as
   its own user, `app` (not `applpi`), which may use all the hardware, as on a Pico: GPIO, I2C and SPI (udev rules
   give their groups the devices), the display, touch and serial ports. Switching on I2C or SPI in `config.txt` is
-  for when an app needs it.
+  for when an app needs it. `"pwm": true` says the app uses the PWM hardware (WS2812 LEDs on GPIO 18, as the Unicorn
+  HAT), which the onboard audio also uses: its driver (`snd_bcm2835`) is unloaded while that app runs, and loaded
+  for any other app or none, so Pis without one keep their audio.
+- Compiled libraries for apps come in the image, from piwheels' wheels for Raspberry Pi OS, each pinned to its
+  SHA-256 (`image/stage2-applpi/05-libraries`): `rpi_ws281x` for WS2812 LEDs.
 - The image's `app` command installs an app from a `.tar` of its folder (which `deploy.ps1` copies over), checks
   its manifest first and that it keeps running after, and removes it. A different app (another name) starts with
   empty state.

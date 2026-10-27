@@ -76,7 +76,8 @@ is the example, and the place to start a new one:
 .\deploy.ps1 <name>     # in the app's repo: copies it to the Pi, starts it, and says whether it's running
 ```
 
-The app is in `/data/app`, with its manifest (`app.json`: name, version, and whether it must run as root),
+The app is in `/data/app`, with its manifest (`app.json`: name, version, whether it must run as root, and whether
+it uses the PWM hardware, as WS2812 LEDs on GPIO 18 do, which turns the onboard audio off while it runs),
 `main.py` and its pure-Python libraries in `lib\`. The Pi runs it as the `app` user, which may use port 80 and the
 hardware (GPIO, I2C, SPI, the display, touch, serial), restarts it if it stops, and keeps it through OS updates: an
 update whose OS stops the app from running goes back. The app keeps what it writes in `/data/app-state`, as the

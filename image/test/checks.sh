@@ -130,6 +130,19 @@ except OSError as error:
     sys.exit(f"its web page: {error}")' || return 1
 }
 
+# The compiled libraries for apps import, and the onboard audio is loaded unless the app uses the PWM hardware
+libraries() {
+	python3 -c 'import rpi_ws281x' || return 1
+	local pwm loaded
+	pwm=$(python3 -c 'import json; print(json.load(open("/data/app/app.json")).get("pwm", False))' 2> /dev/null)
+	loaded=$(lsmod | grep -c '^snd_bcm2835 ')
+	if [ "$pwm" = True ]; then
+		[ "$loaded" = 0 ] || { echo "the app uses PWM, but the audio driver is loaded"; return 1; }
+	else
+		[ "$loaded" = 1 ] || { echo "the audio driver isn't loaded"; return 1; }
+	fi
+}
+
 sudo_works() {
 	sudo -n true
 }
@@ -159,5 +172,6 @@ check services "only the expected services running"
 check timers "no timers that change the system"
 check login_screens "login screens show the slot and the app"
 check app "the app runs and answers (if there is one)"
+check libraries "the libraries for apps import, audio as the app needs"
 check sudo_works "sudo works for the admin user"
 exit $result
