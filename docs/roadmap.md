@@ -157,9 +157,12 @@ from the card's disk ID and the slot's partition (`-02` for A, `-03` for B).
   0 and 1 (a bare bootable system) and our `stage2-applpi` in place of the Lite stage, which brings in compilers,
   Bluetooth, cloud-init and swap. The image goes in `deploy\`.
 - Builds are local until the image works on the test Pi. Then GitHub Actions (free for a public repo) runs the same
-  container, from a tag for releases or by hand from any branch for test builds. Each release keeps its image
-  (compressed) and checksum. A rebuild fetches whatever packages are current, so the kept images, not the build,
-  are what's frozen.
+  container (`.github/workflows/image.yml`, from v0.4): a tag makes a draft release with the image, its `.bmap` and
+  `SHA256SUMS`, published once its notes are written; run by hand from any branch, it keeps a test build for a week.
+  Each release keeps its image (compressed) and checksum. A rebuild fetches whatever packages are current, so the
+  kept images, not the build, are what's frozen. `applpi flash` and `update` take a release (`latest`, or `v0.4.0`)
+  as well as a file, download it to `%LOCALAPPDATA%\ApplPi\images` and check it against `SHA256SUMS`; with no image
+  named and none built in `deploy\`, they use the latest release.
 - Versions are semantic (`vMAJOR.MINOR.PATCH`) and come from git tags, for the image and the `applpi` tool alike:
   `git describe` gives `v0.1.0` for a release and `v0.1.0-3-g1ad84dc` (plus `-dirty` for uncommitted changes) for a
   development build. Major: something apps rely on changes; minor: features and new libraries; patch: fixes. 0.x
@@ -234,7 +237,8 @@ runs and answers on port 80, so `test-pi.ps1` covers it. Released as v0.3.0.
 - Done (v0.3.0): one app per Pi, as above, with [ApplPi Hello](https://github.com/EarthstormSoftware/applpi-hello)
   as the example. Checked on the Pi 2: deploying, a crash (restarted), a bad manifest (refused, the old app kept), an
   app that won't start (reported with its output), removing, and two OS updates with the app running (kept, its
-  settings too, the trial boot waiting for it). Not yet checked: an OS update that stops the app.
+  settings too, the trial boot waiting for it). An OS update the app can't start under
+  (`image	estroken-image.ps1 -App`) went back by itself, with the reason shown (2026-10-27, v0.4 build).
 
 ### 4. OS updates
 
