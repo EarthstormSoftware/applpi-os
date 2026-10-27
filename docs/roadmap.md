@@ -238,7 +238,7 @@ runs and answers on port 80, so `test-pi.ps1` covers it. Released as v0.3.0.
   as the example. Checked on the Pi 2: deploying, a crash (restarted), a bad manifest (refused, the old app kept), an
   app that won't start (reported with its output), removing, and two OS updates with the app running (kept, its
   settings too, the trial boot waiting for it). An OS update the app can't start under
-  (`image	estroken-image.ps1 -App`) went back by itself, with the reason shown (2026-10-27, v0.4 build).
+  (`image\test\broken-image.ps1 -App`) went back by itself, with the reason shown (2026-10-27, v0.4 build).
 
 ### 4. OS updates
 
@@ -312,10 +312,10 @@ with `applpi.json` skips setup mode.
   `deploy.ps1 -WiFi` and Home Assistant would trust it too. Plain HTTP with the web password stays the default, as
   on the Picos, which can't serve HTTPS (a Pico W struggles even to make HTTPS requests).
 
-- **Unicorn HAT Pi** (started: [applpi-unicorn](https://github.com/EarthstormSoftware/applpi-unicorn), on App
-  Base): an 8×8 light, controlled like PlasmaStick, with the modes of the old `uhcontrol.py` and later status and
-  alerts. `rpi_ws281x` is in the image, `"pwm": true` frees the PWM hardware from the audio, and the LEDs need a
-  brightness cap: 64 at full white is about 3.5 A, more than a Pi 2 can supply.
+- **Unicorn HAT Pi** (started: ApplPi Unicorn, on App Base; both stay private until close to v1): an 8×8 light,
+  controlled like PlasmaStick, with the modes of the old `uhcontrol.py` and later status and alerts. `rpi_ws281x` is
+  in the image, `"pwm": true` frees the PWM hardware from the audio, and the LEDs need a brightness cap: 64 at full
+  white is about 3.5 A, more than a Pi 2 can supply.
 - **Touch screen Pi**: the official 7" DSI display as a full-screen touch controller (pygame on KMS, no desktop)
   that drives other devices through their HTTP APIs: the Unicorn HAT Pi and the PlasmaStick's JSON API.
 - The other Pi 2s, as uses come up.
