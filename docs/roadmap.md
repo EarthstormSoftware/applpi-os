@@ -335,7 +335,11 @@ with `applpi.json` skips setup mode.
 - For apps (App Base's rename and factory reset): `app-request setup` restarts into setup mode keeping the settings
   (as the Wi-Fi fallback does, but with the page on Ethernet too, for wired Pis), and `app-request factory-reset`
   forgets them (name, Wi-Fi, keys, time zone) and restarts as a new Pi. The host key stays, and the app and its
-  state (resetting those is the app's own reset). Checked in a container; App Base still has to offer them.
+  state (resetting those is the app's own reset). App Base offers them on the app's page (rename, the Wi-Fi fallback,
+  factory reset), shown only on an OS that has them. Checked on the Pi 2 with the Unicorn (2026-10-27): the
+  fallback's settings read, saved and refused out of range, and setup mode asked for from its page (the page saying
+  so, on the hotspot, then back by itself). The factory reset was checked in a container and by the QEMU test's Pi
+  without settings, not on a Pi (setting it up again needs the Wi-Fi password).
 - Still to do: a real phone on the hotspot (its sign-in page and the certificate warning).
 
 ## Then
