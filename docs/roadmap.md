@@ -222,6 +222,19 @@ The WinUI flashing app.
 
 What's listening, memory and CPU at rest, boot time, and pulling the power while it runs (repeatedly).
 
+- Done (v0.3.0, the Pi 2 with the Wi-Fi dongle and hello running), 2026-10-27:
+  - Listening, scanned from another computer (every TCP port): SSH and the app (80) over IPv4, SSH over IPv6 (the
+    app now listens on IPv6 too). UDP: only mDNS and the DHCP clients (`ss`, in the checks).
+  - At rest: 80 MiB of 920 used (840 available), no swap. The app (Microdot) is 16 MiB. CPU about 95% idle; most of
+    the rest is the USB controller's interrupts (about 760 a second, `dwc_otg`, as on any Pi 2 with USB Wi-Fi).
+  - Two services ran that shouldn't: `paxctld` (for PaX kernels, now purged) and a second `wpa_supplicant` (the
+    D-Bus one, now masked). The checks now fail on any service that isn't expected.
+  - Boot: 23 s to the system running (9 s kernel and initramfs, 14 s userspace), 36 s from a restart command to SSH
+    and the app answering (with the shutdown and the firmware). `ldconfig` ran at every boot (1.3 s), as the
+    read-only root looks freshly updated to systemd each time: now masked. The rest is checking and mounting the
+    partitions (about 4.5 s, which a power cut needs) and the splash.
+- Still to do: pulling the power, repeatedly (needs a switchable plug, or hands).
+
 ## Then
 
 - **Unicorn HAT Pi**: an 8×8 status and alert display (CPU temperature and load, alerts posted to it by other

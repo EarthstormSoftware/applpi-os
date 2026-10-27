@@ -75,7 +75,10 @@ on_chroot <<- EOF
 	useradd --system --uid 800 --gid app --groups gpio,i2c,spi,video,input,dialout --home-dir /data/app-state \
 		--no-create-home --shell /usr/sbin/nologin app
 	systemctl enable applpi-data.service applpi-settings.service applpi-os-check.service applpi-app.service systemd-networkd.service wpa_supplicant@wlan0.service ssh.service avahi-daemon.service
+	# Only wlan0's: the D-Bus one was still enabled in the image after this disable, so it's masked, its D-Bus name too
 	systemctl disable wpa_supplicant.service
+	systemctl mask wpa_supplicant.service
+	rm -f /etc/systemd/system/dbus-fi.w1.wpa_supplicant1.service
 	# Its host keys would be made at every boot (each boot of a read-only root is a "first boot"): ours are on /data
 	systemctl mask sshd-keygen.service
 EOF
