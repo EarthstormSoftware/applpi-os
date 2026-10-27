@@ -1,0 +1,63 @@
+# Builds the ApplPi OS image in the same container as image\build.ps1 (a full build, as for any release).
+# A tag (vX.Y.Z) makes a draft release with the image, its .bmap and SHA256SUMS, for its notes to be written and then
+# published; applpi flash and update download published releases. Run by hand (on any branch), the image is kept as a
+# test build for a few days instead.
+name: Image
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the tags, for the version
+
+      - name: Build the image
+        run: |
+          version=$(git describe --tags --match 'v[0-9]*' --always --dirty)
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          docker build --platform linux/386 --tag applpi-os-builder image
+          docker run --name build --privileged \
+            --env "APPLPI_VERSION=$version" --env "APPLPI_COMMIT=$(git rev-parse --short HEAD)" \
+            --env "APPLPI_BUILD_STAMP=$(date -u +%Y%m%d-%H%M)" --env APPLPI_QUICK=0 \
+            applpi-os-builder ./build-in-container.sh
+          mkdir deploy
+          docker cp build:/pi-gen/deploy/. deploy/
+          ls -l deploy
+
+      - name: Checksums
+        working-directory: deploy
+        run: |
+          test -f "applpi-os-$VERSION.img.xz" && test -f "applpi-os-$VERSION.bmap"
+          sha256sum "applpi-os-$VERSION.img.xz" "applpi-os-$VERSION.bmap" > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Keep a test build
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: applpi-os-${{ env.VERSION }}
+          path: |
+            deploy/applpi-os-*.img.xz
+            deploy/applpi-os-*.bmap
+            deploy/SHA256SUMS
+            deploy/*.info
+          retention-days: 7
+
+      - name: Draft the release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$VERSION" --draft --verify-tag --title "ApplPi OS $VERSION" \
+            --notes "Images for Raspberry Pis (32-bit, armhf). Write one with \`applpi flash $VERSION\`, which checks it against SHA256SUMS." \
+            "deploy/applpi-os-$VERSION.img.xz" "deploy/applpi-os-$VERSION.bmap" deploy/SHA256SUMS

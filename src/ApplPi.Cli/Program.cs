@@ -15,13 +15,15 @@ static class Program
 
         Usage:
           applpi flash [image]  Write the ApplPi OS image to a card in this PC's card reader, check it, then set it
-                                up as below. The image defaults to the newest deploy\applpi-os-*.img.xz. Asks for
-                                administrator rights; only card readers are offered, and you confirm before writing.
+                                up as below. The image is a .img.xz file, or a release (latest, or a version such as
+                                v0.4.0), downloaded from GitHub and checked. It defaults to the newest image you've
+                                built in deploy\, or else the latest release. Asks for administrator rights; only card
+                                readers are offered, and you confirm before writing.
           applpi setup [name]   Ask for a Pi's settings (name, Wi-Fi, time zone, SSH key) and put them on its card.
                                 Works on a card written with the ApplPi OS image, in this PC's card reader.
                                 The Pi reads them at its next boot, then deletes them from the card.
           applpi update [name] [image] [--yes]
-                                Update a Pi's OS over SSH (the image defaults to the newest in deploy\). The new OS
+                                Update a Pi's OS over SSH (the image as for flash). The new OS
                                 goes into the slot that isn't running, and the Pi restarts into it once; it keeps it
                                 if it starts properly, and otherwise goes back to the OS it had. --yes doesn't ask.
           applpi forget <name>  Forget a Pi you no longer use: its saved settings and host key, and ssh's known host.
@@ -68,20 +70,58 @@ static class Program
         return 2;
     }
 
-    /// <summary>The image named, or the newest in deploy\; null (having said why) if there isn't one.</summary>
+    /// <summary>
+    /// The image named: a file, or a published release (v0.4.0, or latest), downloaded and checked. With none named,
+    /// the newest in deploy\ (a build of your own), or else the latest release. Null (having said why) if there isn't one.
+    /// </summary>
     static string? FindImage(string? image)
     {
         image ??= Directory.Exists("deploy")
             ? Directory.GetFiles("deploy", "applpi-os-*.img.xz").OrderBy(File.GetLastWriteTimeUtc).LastOrDefault()
             : null;
-        if (image is null || !File.Exists(image))
+        image ??= "latest";
+        if (ReleaseImages.IsRelease(image) && !File.Exists(image))
         {
-            Console.Error.WriteLine(image is null
-                ? "No image found in deploy\\: build one with image\\build.ps1, or name the .img.xz file."
-                : $"No such image: {image}");
+            return DownloadRelease(image);
+        }
+        if (!File.Exists(image))
+        {
+            Console.Error.WriteLine($"No such image: {image}");
             return null;
         }
         return Path.GetFullPath(image);
+    }
+
+    static string? DownloadRelease(string release)
+    {
+        Console.WriteLine($"Getting ApplPi OS {release} from GitHub");
+        var shown = -1L;
+        try
+        {
+            var image = ReleaseImages.Download(release, (name, bytes, total) =>
+            {
+                var mib = bytes >> 20;
+                if (mib == shown)
+                {
+                    return;
+                }
+                shown = mib;
+                Console.Write(total is { } all
+                    ? $"\r  {name}: {mib} of {all >> 20} MiB"
+                    : $"\r  {name}: {mib} MiB");
+            });
+            if (shown >= 0)
+            {
+                Console.WriteLine();
+            }
+            Console.WriteLine($"  {Path.GetFileName(image)}, checked against the release's SHA256SUMS");
+            return image;
+        }
+        catch (HttpRequestException error)
+        {
+            Console.Error.WriteLine($"\nCouldn't download it: {error.Message}");
+            return null;
+        }
     }
 
     static int Flash(string? image, bool elevated)

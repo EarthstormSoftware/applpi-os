@@ -10,33 +10,38 @@ finds a failed unit and restarts into the permanent slot. The copy is deploy\<im
 
     dotnet run --project src\ApplPi.Cli -- update <name> deploy\<image>-broken.img.xz
 
+With -App, the OS is fine but the app can't start under it (a drop-in for applpi-app.service makes its start fail),
+so the trial boot is given up because the app isn't running, as an OS update that broke the app would be. The copy
+is then deploy\<image>-broken-app.img.xz.
+
 .PARAMETER Image
 The image to break. Defaults to the newest in deploy\ that isn't already broken.
 #>
 [CmdletBinding()]
-param([string]$Image)
+param([string]$Image, [switch]$App)
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot)
 $deploy = Join-Path $repo 'deploy'
 if (-not $Image) {
-    $Image = Get-ChildItem $deploy -Filter 'applpi-os-*.img.xz' | Where-Object Name -notlike '*-broken.img.xz' |
+    $Image = Get-ChildItem $deploy -Filter 'applpi-os-*.img.xz' | Where-Object Name -notlike '*-broken*.img.xz' |
         Sort-Object LastWriteTime | Select-Object -Last 1 -ExpandProperty FullName
     if (-not $Image) { throw "No image in ${deploy}: build one with image\build.ps1" }
 }
 $Image = (Resolve-Path $Image).Path
-$broken = $Image -replace '\.img\.xz$', '-broken.img.xz'
-
-# Docker writes progress to stderr, which Windows PowerShell turns into errors when output is redirected
-$ErrorActionPreference = 'Continue'
-docker build --quiet --tag applpi-os-tester --file (Join-Path $PSScriptRoot 'tester.Dockerfile') $PSScriptRoot | Out-Null
-Write-Host "Breaking $(Split-Path -Leaf $Image)"
-docker run --rm --privileged -v "$(Split-Path $Image):/deploy" applpi-os-tester bash -c @"
-set -euo pipefail
-xz -dc '/deploy/$(Split-Path -Leaf $Image)' > /tmp/card.img
-start=`$(sfdisk -d /tmp/card.img | awk -F'[=,]' '/card.img2 / {print `$2}')
-mkdir -p /mnt/root
-mount -o loop,offset=`$((start * 512)) /tmp/card.img /mnt/root
+$kind = if ($App) { 'broken-app' } else { 'broken' }
+$broken = $Image -replace '\.img\.xz$', "-$kind.img.xz"
+if ($App) {
+    $breakage = @'
+mkdir -p /mnt/root/etc/systemd/system/applpi-app.service.d
+cat > /mnt/root/etc/systemd/system/applpi-app.service.d/test-broken.conf <<'EOF'
+# Test only (image\test\broken-image.ps1 -App): the app can't start under this OS, so an OS update to it goes back
+[Service]
+ExecStartPre=/bin/false
+EOF
+'@
+} else {
+    $breakage = @'
 cat > /mnt/root/etc/systemd/system/applpi-test-broken.service <<'EOF'
 # Test only (image\test\broken-image.ps1): fails at every boot, so an OS update to this image goes back
 [Unit]
@@ -50,12 +55,27 @@ ExecStart=/bin/false
 WantedBy=multi-user.target
 EOF
 ln -s /etc/systemd/system/applpi-test-broken.service /mnt/root/etc/systemd/system/multi-user.target.wants/
-sed -i 's/^VERSION=.*/&-broken/' /mnt/root/etc/applpi-release
+'@
+}
+$breakage = $breakage -replace "`r", ''
+
+# Docker writes progress to stderr, which Windows PowerShell turns into errors when output is redirected
+$ErrorActionPreference = 'Continue'
+docker build --quiet --tag applpi-os-tester --file (Join-Path $PSScriptRoot 'tester.Dockerfile') $PSScriptRoot | Out-Null
+Write-Host "Breaking $(Split-Path -Leaf $Image)"
+docker run --rm --privileged -v "$(Split-Path $Image):/deploy" applpi-os-tester bash -c @"
+set -euo pipefail
+xz -dc '/deploy/$(Split-Path -Leaf $Image)' > /tmp/card.img
+start=`$(sfdisk -d /tmp/card.img | awk -F'[=,]' '/card.img2 / {print `$2}')
+mkdir -p /mnt/root
+mount -o loop,offset=`$((start * 512)) /tmp/card.img /mnt/root
+$breakage
+sed -i 's/^VERSION=.*/&-$kind/' /mnt/root/etc/applpi-release
 umount /mnt/root
 # The release file on the boot partition, which the update copies into the slot, says so too
 boot=`$(sfdisk -d /tmp/card.img | awk -F'[=,]' '/card.img1 / {print `$2}')
 mcopy -i /tmp/card.img@@`$((boot * 512)) ::applpi-release.txt /tmp/release.txt
-sed -i 's/^VERSION=.*/&-broken/' /tmp/release.txt
+sed -i 's/^VERSION=.*/&-$kind/' /tmp/release.txt
 mcopy -o -i /tmp/card.img@@`$((boot * 512)) /tmp/release.txt ::applpi-release.txt
 mcopy -o -i /tmp/card.img@@`$((boot * 512)) /tmp/release.txt ::slotA/applpi-release.txt
 xz -T0 -1 -c /tmp/card.img > '/deploy/$(Split-Path -Leaf $broken)'
