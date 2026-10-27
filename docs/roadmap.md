@@ -133,6 +133,11 @@ from the card's disk ID and the slot's partition (`-02` for A, `-03` for B).
   empty state.
 - An OS update checks the app too: if it was running before the update, the trial boot is only kept if the app
   keeps running for 30 seconds.
+- To come (for App Base, so an ApplPi app's page can change what a Pico's can): the app may ask the OS, and only
+  for these, to install a new version of itself sent over the network (on trial: if it doesn't keep running, the
+  old one goes back), to set the time zone and NTP server, to restart the Pi, and to start setup mode (step 7: the
+  name and Wi-Fi are changed there, as the name is how SSH and `applpi` know the Pi). `systemd`'s watchdog for the
+  app, so a hung app (not only one that stops) is restarted.
 - The root filesystem is read-only, so the app keeps its settings and anything else it writes in `/data/app-state`,
   which a deploy leaves alone.
 - Both login screens show the app's name, version and whether it's running, beside the slot and last update.
@@ -261,11 +266,44 @@ What's listening, memory and CPU at rest, boot time, and pulling the power while
     partitions (about 4.5 s, which a power cut needs) and the splash.
 - Still to do: pulling the power, repeatedly (needs a switchable plug, or hands).
 
+### 7. Setup mode (before v1)
+
+A second way to set a Pi up, as the Picos are (decided 2026-10-27). `applpi flash` stays as the quick way: a card
+with `applpi.json` skips setup mode.
+
+- A card with no settings (written by any imager, from a published image) starts an `ApplPi-SETUP` hotspot for 10
+  minutes, as the Picos do: join it and open the setup page. It asks for the name, Wi-Fi, time zone and SSH key,
+  and the settings go on the data partition as `applpi.json`'s do.
+- The page is HTTPS, with a certificate the Pi makes on its first boot, so nothing on it can be read by someone
+  listening to the open hotspot (the Wi-Fi password, above all). The browser can't check the certificate (no
+  public authority issues them for `.local` names), so it warns once; the certificate's fingerprint is shown on
+  the console, for checking against the browser's, which is what stops someone pretending to be the Pi in those
+  minutes.
+- SSH keys: paste your public key (or upload `id_ed25519.pub`), which needs nothing secret sent; or, for someone
+  without one, the Pi makes a key pair and offers the private key to download (safe over HTTPS from listeners) and
+  then forgets it. Either way the page offers the Pi's host key as a `known_hosts` line, and its fingerprint: if an
+  impostor gave a false one, SSH would refuse the real Pi, so it can't go unnoticed.
+- If Wi-Fi doesn't connect after repeated tries (a new router, a changed password), the Pi starts the hotspot again,
+  as the Picos do, keeping its settings until new ones are saved, so it can be set up again without reflashing.
+  The same makes renaming the Pi and a factory reset possible (App Base offers those through it).
+- Probably no new packages: `wpa_supplicant` can run the hotspot and `systemd-networkd` has a DHCP server. The setup
+  page is a small Python server that runs only in setup mode, so the rule on what listens holds the rest of the
+  time.
+- First: check the Pi 2's Wi-Fi dongle can run a hotspot (its driver usually can), on the test Pi.
+- With this, the Linux side of `applpi` may only need `update`, which is plain SSH (see Tools on Windows and Linux).
+
 ## Then
 
-- **Unicorn HAT Pi**: an 8×8 status and alert display (CPU temperature and load, alerts posted to it by other
-  devices). `rpi_ws281x` on GPIO 18 needs the onboard audio off, and the LEDs need a brightness cap: 64 at full white
-  is about 3.5 A, more than a Pi 2 can supply.
+- **HTTPS for apps** (after v1, optional): the app's page over HTTPS, so its web password (HTTP Basic auth) isn't
+  sent in the clear. `applpi` would be a small certificate authority of your own: made once on the PC, it signs each
+  Pi's certificate, and each PC and phone trusts it once (easy on Windows, fiddly on phones); tools such as
+  `deploy.ps1 -WiFi` and Home Assistant would trust it too. Plain HTTP with the web password stays the default, as
+  on the Picos, which can't serve HTTPS (a Pico W struggles even to make HTTPS requests).
+
+- **Unicorn HAT Pi** (started: [applpi-unicorn](https://github.com/EarthstormSoftware/applpi-unicorn), on App
+  Base): an 8×8 light, controlled like PlasmaStick, with the modes of the old `uhcontrol.py` and later status and
+  alerts. `rpi_ws281x` is in the image, `"pwm": true` frees the PWM hardware from the audio, and the LEDs need a
+  brightness cap: 64 at full white is about 3.5 A, more than a Pi 2 can supply.
 - **Touch screen Pi**: the official 7" DSI display as a full-screen touch controller (pygame on KMS, no desktop)
   that drives other devices through their HTTP APIs: the Unicorn HAT Pi and the PlasmaStick's JSON API.
 - The other Pi 2s, as uses come up.
