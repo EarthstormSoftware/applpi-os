@@ -7,16 +7,21 @@ else, as root (sudo, in /etc/sudoers.d/020_applpi-app); each request is checked 
                                 old one goes back. /data/app-state/update-result.json then says how it went.
   app-request time-zone <name>  sets the time zone, such as Europe/London (kept on the data partition)
   app-request ntp <server>      sets the time server ("" for Debian's)
-  app-request settings          prints {"time_zone", "ntp"} as JSON
+  app-request wifi-fallback <on|off> <after minutes> <for minutes>
+                                whether the Pi goes into setup mode when it has no network a while after starting, and
+                                for how long (from the next start)
+  app-request settings          prints {"time_zone", "ntp", "wifi_fallback"} as JSON
   app-request restart           restarts the Pi
 """
 
+import importlib.util
 import json
 import os
 import re
 import stat
 import subprocess
 import sys
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
 SETTINGS = Path("/data/settings/device.json")
@@ -60,6 +65,14 @@ def change_settings(key, value):
     else:
         settings.pop(key, None)
     write(SETTINGS, json.dumps(settings, indent=2) + "\n", 0o600)
+
+
+def settings_rules():
+    """apply-settings, as a module: the settings' rules and defaults."""
+    loader = SourceFileLoader("apply_settings", "/usr/lib/applpi/apply-settings")
+    module = importlib.util.module_from_spec(importlib.util.spec_from_loader("apply_settings", loader))
+    loader.exec_module(module)
+    return module
 
 
 def check_time_zone(name):
@@ -125,9 +138,20 @@ def main():
             change_settings("ntp", args[1])
             apply_ntp(args[1])
             print(f"Time server: {args[1] or 'the default'}")
+        elif len(args) == 4 and args[0] == "wifi-fallback" and args[1] in ("on", "off"):
+            rules = settings_rules()
+            try:
+                fallback = rules.check_wifi_fallback({"enabled": args[1] == "on", "after_minutes": int(args[2]),
+                                                      "for_minutes": int(args[3])})
+            except (ValueError, rules.SettingsError) as error:
+                raise RequestError(f"Not a Wi-Fi fallback: {error}") from None
+            change_settings("wifi_fallback", fallback)
+            print(f"Wi-Fi fallback: {'on' if fallback['enabled'] else 'off'}, after {fallback['after_minutes']} "
+                  f"minutes, for {fallback['for_minutes']} (from the next start)")
         elif args == ["settings"]:
             settings = json.loads(SETTINGS.read_text(encoding="utf-8"))
-            print(json.dumps({"time_zone": settings.get("timezone"), "ntp": settings.get("ntp", "")}))
+            print(json.dumps({"time_zone": settings.get("timezone"), "ntp": settings.get("ntp", ""),
+                              "wifi_fallback": settings_rules().wifi_fallback(settings)}))
         elif args == ["restart"]:
             subprocess.run(["systemctl", "reboot"], check=True)
         else:

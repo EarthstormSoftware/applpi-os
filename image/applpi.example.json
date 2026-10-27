@@ -6,6 +6,11 @@
     "ssid": "Example network",
     "password": "example-password"
   },
+  "wifi_fallback": {
+    "enabled": true,
+    "after_minutes": 5,
+    "for_minutes": 10
+  },
   "ssh_keys": [
     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleExampleExampleExampleExampleExample example"
   ]

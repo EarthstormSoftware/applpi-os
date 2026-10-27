@@ -7,6 +7,8 @@
 #                          (applpi-os-tester, privileged)  boots the card and checks it over SSH; results in /work/out.
 #                                                          Full: then updates it to the same image (os-update write)
 #                                                          and boots slot B as tryboot would.
+#   setup <image.img.xz>   (applpi-os-tester, privileged)  boots the card with no settings, sets it up from the setup
+#                                                          page, then boots it on those settings and checks it.
 # QEMU's Pi 2 model can't read the SD card with the Pi kernel, so this tests everything of ours (first boot, settings,
 # SSH, read-only root, writing an update) but not the Pi's kernel, firmware (os_prefix, tryboot) or Wi-Fi.
 set -euo pipefail
@@ -83,6 +85,66 @@ boot() {
 	mdir -i "$boot_img" :: | grep -iE "applpi(\.json|-error)" | tee -a "$out/summary.log" || echo "no settings or error file" | tee -a "$out/summary.log"
 }
 
+# A card with no settings, as written by any imager: setup mode, set up from its page (over QEMU's network, as it
+# would be over the hotspot or Ethernet), then a boot on the settings saved there, checked as usual
+setup() {
+	local out=$work/out
+	rm -rf "$out"; mkdir -p "$out"
+	add_modules 2
+	ssh-keygen -q -t ed25519 -N "" -f /tmp/key
+	slot_cmdline A
+
+	echo "== Boot 1 (no settings: setup mode)" | tee -a "$out/summary.log"
+	start_qemu 1
+	# Up to 40 minutes for the page (the first boot lays out the card)
+	local up=
+	for _ in $(seq 240); do
+		if curl -sk -m 20 -o "$out/setup-form.html" https://localhost:8443/; then up=1; break; fi
+		kill -0 $qemu 2>/dev/null || break
+		sleep 10
+	done
+	if [ -z "$up" ]; then
+		echo "The setup page never came up" | tee -a "$out/summary.log"
+		stop_qemu
+		return 0
+	fi
+	echo "Setup page up: $(grep -o 'This Pi has no settings yet.' "$out/setup-form.html" || echo 'not for a Pi without settings')" |
+		tee -a "$out/summary.log"
+
+	# Port 80 shows the certificate's fingerprint: it must be the one the page is served with
+	local shown served
+	shown=$(curl -s -m 20 http://localhost:8080/ | grep -o '<pre>[0-9A-F:]*</pre>' | sed 's/<[^>]*>//g' || true)
+	served=$(openssl s_client -connect localhost:8443 < /dev/null 2> /dev/null |
+		openssl x509 -noout -fingerprint -sha256 | cut -d= -f2 || true)
+	if [ -n "$shown" ] && [ "$shown" = "$served" ]; then
+		echo "Port 80 shows the certificate's fingerprint" | tee -a "$out/summary.log"
+	else
+		echo "FAILED  the fingerprint on port 80 ($shown) isn't the certificate's ($served)" | tee -a "$out/summary.log"
+	fi
+
+	# Set up as someone would: no Wi-Fi (QEMU has none), their SSH key, and the host key the page then gives
+	local status
+	status=$(curl -sk -m 60 -o /dev/null -w '%{http_code}' https://localhost:8443/save \
+		--data hostname=applpi-qemu --data timezone=Europe/London --data country=GB --data ssid= --data keys=paste \
+		--data-urlencode "public_key=$(cat /tmp/key.pub)" \
+		--data fallback_enabled=on --data fallback_after=5 --data fallback_for=10 || true)
+	curl -sk -m 20 -o "$out/setup-done.html" https://localhost:8443/ || true
+	local line
+	line=$(grep -o 'applpi-qemu\.local ssh-ed25519 [A-Za-z0-9+/=]*' "$out/setup-done.html" || true)
+	if [ "$status" = 303 ] && [ -n "$line" ]; then
+		echo "[localhost]:2222 ${line#* }" > /tmp/known_hosts
+		echo "Saved, and the page gave the host key" | tee -a "$out/summary.log"
+	else
+		echo "FAILED  saving on the setup page (HTTP $status)" | tee -a "$out/summary.log"
+	fi
+	curl -sk -m 20 -o /dev/null -X POST https://localhost:8443/restart || true
+	stop_qemu
+
+	# The settings saved, and the host key as the page gave it
+	run_boot 2 && checks 2 && ssh_pi 'hostname; sudo -n systemctl poweroff' >> "$out/checks-2.log" 2>&1 || true
+	stop_qemu
+}
+
 # The generic kernel's modules go into the root of slot partition $1, so the Pi image needn't carry them
 add_modules() {
 	mkdir -p /mnt/root
@@ -113,14 +175,20 @@ update() {
 		>> "$work/out/update.log" 2>&1 || true
 }
 
-run_boot() {
-	echo "== Boot $1" | tee -a "$work/out/summary.log"
+start_qemu() {
+	# SSH, and the setup page (HTTP and HTTPS) for setup mode
 	qemu-system-arm -M virt,highmem=off -cpu cortex-a15 -m 1G -smp 4 \
 		-kernel "$work/vmlinuz" -initrd "$work/initrd.img" -append "$cmdline" \
 		-drive if=none,file="$img",format=raw,id=card -device virtio-blk-device,drive=card \
-		-netdev user,id=net,hostfwd=tcp::2222-:22 -device virtio-net-device,netdev=net \
+		-netdev user,id=net,hostfwd=tcp::2222-:22,hostfwd=tcp::8080-:80,hostfwd=tcp::8443-:443 \
+		-device virtio-net-device,netdev=net \
 		-nographic -no-reboot > "$work/out/console-$1.log" 2>&1 &
 	qemu=$!
+}
+
+run_boot() {
+	echo "== Boot $1" | tee -a "$work/out/summary.log"
+	start_qemu "$1"
 	# Up to 40 minutes for SSH (the first boot lays out the card, and everything is emulated)
 	for _ in $(seq 120); do
 		if ssh_pi true 2>/dev/null; then

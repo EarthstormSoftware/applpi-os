@@ -37,6 +37,11 @@ SETUP_ADDRESS = "192.168.4.1"
 # Sorts before 20-wireless.network, so it's the one networkd uses for wlan0
 SETUP_NETWORK = Path("/run/systemd/network/05-setup.network")
 SERIAL = Path("/proc/device-tree/serial-number")
+# The Wi-Fi fallback (wifi-check): with no network after_minutes after starting, setup mode for for_minutes. Set in
+# the settings (applpi.json, the setup page, or the app by app-request); these are the defaults, and the limits.
+WIFI_FALLBACK = {"enabled": True, "after_minutes": 5, "for_minutes": 10}
+WIFI_FALLBACK_LIMITS = {"after_minutes": (1, 60), "for_minutes": (5, 120)}
+WIFI_CHECK = RUN_DIR / "wifi-check"
 
 HOSTNAME = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")
 COUNTRY = re.compile(r"[A-Z]{2}")
@@ -95,6 +100,10 @@ def check(raw: object) -> dict:
         psk = hashlib.pbkdf2_hmac("sha1", password.encode(), ssid.encode(), 4096, 32).hex()
         settings["wifi"] = {"country": country, "ssid": ssid, "psk": psk}
 
+    fallback = raw.get("wifi_fallback")
+    if fallback is not None:
+        settings["wifi_fallback"] = check_wifi_fallback(fallback)
+
     keys = raw.get("ssh_keys")
     if (not isinstance(keys, list) or not keys
             or not all(isinstance(key, str) and SSH_KEY.fullmatch(key.strip()) for key in keys)):
@@ -110,6 +119,24 @@ def check(raw: object) -> dict:
         settings["host_key"] = host_key
 
     return settings
+
+
+def check_wifi_fallback(raw: object) -> dict:
+    """The Wi-Fi fallback's settings, with the defaults for any left out (the setup page and app-request use this)."""
+    if not isinstance(raw, dict):
+        raise SettingsError("wifi_fallback must be an object with enabled, after_minutes and for_minutes")
+    fallback = WIFI_FALLBACK | raw
+    if set(fallback) != set(WIFI_FALLBACK) or not isinstance(fallback["enabled"], bool):
+        raise SettingsError("wifi_fallback must be an object with enabled, after_minutes and for_minutes")
+    for key, (lowest, highest) in WIFI_FALLBACK_LIMITS.items():
+        if type(fallback[key]) is not int or not lowest <= fallback[key] <= highest:
+            raise SettingsError(f"wifi_fallback.{key} must be {lowest}-{highest} minutes")
+    return fallback
+
+
+def wifi_fallback(settings: dict) -> dict:
+    """The Wi-Fi fallback as set, or the defaults."""
+    return WIFI_FALLBACK | settings.get("wifi_fallback", {})
 
 
 def write(path: Path, text: str, mode: int) -> None:
@@ -171,6 +198,10 @@ def apply(settings: dict) -> None:
     write(RUN_DIR / "authorized_keys" / USER, "\n".join(settings["ssh_keys"]) + "\n", 0o644)
 
     wifi = settings.get("wifi")
+    fallback = wifi_fallback(settings)
+    if wifi and fallback["enabled"] and not SETUP.exists():
+        # For wifi-check (applpi-wifi-check.service runs only with this)
+        write(WIFI_CHECK, f"WAIT_SECONDS={fallback['after_minutes'] * 60}\n", 0o644)
     if wifi and not SETUP.exists():
         write(RUN_DIR / "wpa_supplicant-wlan0.conf",
               f"country={wifi['country']}\n"

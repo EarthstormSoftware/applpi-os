@@ -1,15 +1,18 @@
 #!/bin/bash
-# The Wi-Fi check, as the Picos have: if the Pi has Wi-Fi settings but no network within 5 minutes of starting (Wi-Fi
-# didn't connect, and Ethernet isn't there either), it restarts into setup mode for 10 minutes, so it can be given new
-# Wi-Fi settings without reflashing (a new router, a changed password). After that it tries Wi-Fi again, so a router
-# that was only off for a while is found again. Not on an OS update's trial boot: that has its own check, and goes back.
+# The Wi-Fi check, as the Picos have: if the Pi has Wi-Fi settings but no network a while after starting (5 minutes
+# unless set otherwise: Wi-Fi didn't connect, and Ethernet isn't there either), it restarts into setup mode for a while
+# (10 minutes), so it can be given new Wi-Fi settings without reflashing (a new router, a changed password). After
+# that it tries Wi-Fi again, so a router that was only off for a while is found again. Not on an OS update's trial
+# boot: that has its own check, and goes back. The fallback can be switched off, and both times changed, in the
+# settings (wifi_fallback); apply-settings writes /run/applpi/wifi-check only when it's on.
 set -u
 WAIT_SECONDS=300
+. /run/applpi/wifi-check
 
 if /usr/lib/applpi/os-update status 2> /dev/null | grep -qx 'tryboot=1'; then
 	exit 0
 fi
-if /usr/lib/systemd/systemd-networkd-wait-online --any --operational-state=routable --timeout=$WAIT_SECONDS; then
+if /usr/lib/systemd/systemd-networkd-wait-online --any --operational-state=routable --timeout="$WAIT_SECONDS"; then
 	exit 0
 fi
 # Without the Wi-Fi dongle there's no hotspot either

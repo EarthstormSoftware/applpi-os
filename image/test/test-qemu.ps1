@@ -7,7 +7,8 @@ Boots the image on QEMU's generic ARM machine with Debian's generic ARM kernel (
 card with the Pi kernel). This checks first boot (root B and the data partition), applpi.json, SSH by key, the
 read-only root and what listens on the network. The full test then writes an OS update (the same image, into slot B)
 and boots slot B, as tryboot would: the host key must stay the same and the root's changes be gone. Not the Pi's own
-kernel, firmware (os_prefix, tryboot) or Wi-Fi. -Quick (one boot) takes about 20 minutes.
+kernel, firmware (os_prefix, tryboot) or Wi-Fi. -Quick (one boot) takes about 20 minutes. -Setup tests a card with
+no settings instead: setup mode, set up from its setup page, then a boot on those settings.
 Results go to deploy\test\.
 
 .PARAMETER Image
@@ -15,9 +16,13 @@ The image to test. Defaults to the newest in deploy\.
 
 .PARAMETER Quick
 Boot once instead of twice. Use the full test for releases.
+
+.PARAMETER Setup
+Test setup mode: no applpi.json on the card; the test fills in the setup page (over QEMU's network, as over the
+hotspot or Ethernet), then boots on the settings saved there and runs the checks.
 #>
 [CmdletBinding()]
-param([string]$Image, [switch]$Quick)
+param([string]$Image, [switch]$Quick, [switch]$Setup)
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot)
@@ -46,14 +51,15 @@ Invoke-Docker build --quiet --tag applpi-os-tester --file (Join-Path $PSScriptRo
 Invoke-Docker build --quiet --platform linux/arm/v7 --tag applpi-os-test-kernel `
     --file (Join-Path $PSScriptRoot 'kernel.Dockerfile') $PSScriptRoot | Out-Null
 
-Write-Host "Testing $Image$(if ($Quick) { ' (quick: one boot)' })"
+Write-Host "Testing $Image$(if ($Setup) { ' (setup mode)' } elseif ($Quick) { ' (quick: one boot)' })"
 New-Item -ItemType Directory -Force $results | Out-Null
 Get-ChildItem $results | Remove-Item -Recurse -Force
 try {
     Invoke-Step @('--privileged', '-v', "$(Split-Path $Image):/image:ro", 'applpi-os-tester') @('unpack', "/image/$(Split-Path -Leaf $Image)")
     Invoke-Step @('--platform', 'linux/arm/v7', 'applpi-os-test-kernel') @('kernel')
+    $boot = if ($Setup) { @('setup') } elseif ($Quick) { @('boot', 'quick') } else { @('boot', 'full') }
     Invoke-Step @('--privileged', '-v', "$(Split-Path $Image):/image:ro", 'applpi-os-tester') `
-        @('boot', $(if ($Quick) { 'quick' } else { 'full' }), "/image/$(Split-Path -Leaf $Image)")
+        (@($boot) + "/image/$(Split-Path -Leaf $Image)")
 }
 finally {
     $ErrorActionPreference = 'Continue'

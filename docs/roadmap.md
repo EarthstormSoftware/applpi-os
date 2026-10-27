@@ -63,7 +63,9 @@ partition, so a Pi keeps the same identity across OS updates.
 ### Device settings and first boot
 
 Windows can't write ext4, so the flash tool writes the device's settings to `applpi.json` on the boot partition
-(format: `image\applpi.example.json`): hostname, time zone, Wi-Fi country, network and password, SSH public key(s).
+(format: `image\applpi.example.json`): hostname, time zone, Wi-Fi country, network and password, SSH public key(s),
+and optionally the Wi-Fi fallback (whether, after how long and for how long setup mode starts when Wi-Fi doesn't
+connect: see step 7).
 At boot, `applpi-settings.service` checks the file, moves the settings to the data partition (keeping the Wi-Fi key
 made from the password, not the password) and deletes `applpi.json`, so the password doesn't stay on the FAT
 partition. `applpi.json` can also carry the Pi's SSH host key: `applpi` makes one per Pi, keeps it (encrypted) with
@@ -318,13 +320,20 @@ with `applpi.json` skips setup mode.
     Wi-Fi key, then the Pi restarts on its settings.
   - `wifi-check` (`applpi-wifi-check.service`): with Wi-Fi settings but no routable network 5 minutes after
     starting, it writes `setup-next` and restarts. Not on a trial boot, which goes back instead.
+  - The Wi-Fi fallback is a setting (`wifi_fallback`: `enabled`, `after_minutes` 1-60, `for_minutes` 5-120;
+    defaults on, 5 and 10), since restarting by itself is a change the system makes on its own: in `applpi.json`, on
+    the setup page, and from the app (`app-request wifi-fallback on|off <after> <for>`), so App Base can offer it on
+    the app's page. The Picos should get the same three settings from App Base.
 - Checked on the Pi 2 (2026-10-27): a normal boot (all checks; the Wi-Fi check stops once Wi-Fi is up), the Wi-Fi
   check's fallback (made to time out), and setup mode from another Pi joining the hotspot: an address by DHCP, the
   captive DNS, port 80, the certificate matching the fingerprint shown, the scan for networks while the hotspot
   runs, and back on its own Wi-Fi after 10 minutes. Then the form sent back as filled in (an empty password, the
   keys kept): saved, the host key's fingerprint and `known_hosts` line shown, and restarted on its settings.
-- Still to do: a card with no settings in the QEMU test (setup over Ethernet), and renaming and a factory reset for
-  apps (an `app-request` to restart into setup mode).
+- The QEMU test has a setup-mode run (`test-qemu.ps1 -Setup`): a card with no settings, set up from its page over
+  the network, then booted on those settings and checked, trusting only the host key the page gave. Passed
+  (2026-10-27). `app-request wifi-fallback` checked on the Pi: refused out of range, and used at the next start.
+- Still to do: renaming and a factory reset for apps (an `app-request` to restart into setup mode), a real phone on
+  the hotspot (its sign-in page and the certificate warning), and the README.
 
 ## Then
 

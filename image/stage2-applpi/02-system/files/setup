@@ -53,9 +53,9 @@ CERTIFICATE_KEY = Path("/data/setup/key.pem")
 ZONEINFO = Path("/usr/share/zoneinfo")
 ADDRESS = settings_rules.SETUP_ADDRESS
 SSID = settings_rules.SETUP_SSID
-# With settings to go back to, setup mode ends after this, as on the Picos (but not while the page is in use: each
-# visit leaves at least IN_USE_SECONDS); once saved, the Pi restarts after RESTART_SECONDS if the page doesn't ask first
-SETUP_SECONDS = 600
+# With settings to go back to, setup mode ends after the Wi-Fi fallback's for_minutes, as on the Picos (but not while
+# the page is in use: each visit leaves at least IN_USE_SECONDS); once saved, the Pi restarts after RESTART_SECONDS if
+# the page doesn't ask first
 IN_USE_SECONDS = 300
 RESTART_SECONDS = 600
 LEDS = (Path("/sys/class/leds/ACT/trigger"), Path("/sys/class/leds/led0/trigger"))
@@ -77,7 +77,8 @@ class Setup:
         self.networks = []
         self.saved = None
         self.private_key = None
-        self.restart_at = None if self.current is None else time.monotonic() + SETUP_SECONDS
+        self.minutes = settings_rules.wifi_fallback(self.current or {})["for_minutes"]
+        self.restart_at = None if self.current is None else time.monotonic() + self.minutes * 60
         self.lock = threading.Lock()
 
     def scan(self):
@@ -134,6 +135,14 @@ class Setup:
             if not raw["ssh_keys"]:
                 return "Paste your SSH public key (from your .ssh folder, ending in .pub), or let the Pi make one."
 
+        if "fallback_after" in form:
+            try:
+                raw["wifi_fallback"] = {"enabled": "fallback_enabled" in form,
+                                        "after_minutes": int(form["fallback_after"]),
+                                        "for_minutes": int(form.get("fallback_for", ""))}
+            except ValueError:
+                return "The Wi-Fi fallback's times are whole minutes."
+
         try:
             settings = settings_rules.check(raw)
         except settings_rules.SettingsError as error:
@@ -141,10 +150,11 @@ class Setup:
         settings.pop("host_key", None)
         if kept_wifi:
             settings["wifi"] = kept_wifi
-        if self.current and self.current.get("ntp"):
-            settings["ntp"] = self.current["ntp"]
+        for key in ("ntp", "wifi_fallback"):
+            if self.current and self.current.get(key) and key not in settings:
+                settings[key] = self.current[key]
         # In the order check() gives, as applpi.json's are kept
-        order = ["hostname", "timezone", "ntp", "wifi", "ssh_keys"]
+        order = ["hostname", "timezone", "ntp", "wifi", "wifi_fallback", "ssh_keys"]
         settings = dict(sorted(settings.items(), key=lambda item: order.index(item[0])))
 
         with self.lock:
@@ -276,7 +286,13 @@ class Handler(BaseHTTPRequestHandler):
         networks = setup.networks + ([wifi["ssid"]] if wifi and wifi["ssid"] not in setup.networks else [])
         keys = form.get("keys") or ("keep" if current else "paste")
         reason = ("This Pi has no settings yet." if not self.state.current
-                  else "Wi-Fi didn't connect, so the Pi is in setup mode for 10 minutes, then it tries again.")
+                  else f"Wi-Fi didn't connect, so the Pi is in setup mode for {setup.minutes} minutes, then it tries "
+                       "again.")
+        fallback = settings_rules.wifi_fallback(current)
+        if "fallback_after" in form:
+            fallback = {"enabled": "fallback_enabled" in form, "after_minutes": form["fallback_after"],
+                        "for_minutes": form.get("fallback_for", "")}
+        limits = settings_rules.WIFI_FALLBACK_LIMITS
         keep = ('<label class="choice"><input type="radio" name="keys" value="keep"'
                 f'{" checked" if keys == "keep" else ""}>Keep the keys it has</label>') if current else ""
         body = f"""
@@ -310,6 +326,16 @@ class Handler(BaseHTTPRequestHandler):
 <p class="hint">Paste it, or choose the <code>.pub</code> file.</p>
 <label class="choice"><input type="radio" name="keys" value="make"{" checked" if keys == "make" else ""}>Make a key
   for me (to download next)</label>
+</fieldset>
+<fieldset><legend>If Wi-Fi doesn't connect</legend>
+<label class="choice"><input type="checkbox" name="fallback_enabled"{" checked" if fallback["enabled"] else ""}
+  style="width:auto;margin:0 6px 0 0">Come back to setup mode</label>
+<label for="fallback_after">After this many minutes without a network</label>
+<input id="fallback_after" name="fallback_after" type="number" min="{limits['after_minutes'][0]}"
+  max="{limits['after_minutes'][1]}" value="{html.escape(str(fallback['after_minutes']))}" required>
+<label for="fallback_for">For this many minutes, then try Wi-Fi again</label>
+<input id="fallback_for" name="fallback_for" type="number" min="{limits['for_minutes'][0]}"
+  max="{limits['for_minutes'][1]}" value="{html.escape(str(fallback['for_minutes']))}" required>
 </fieldset>
 <button type="submit">Save</button>
 </form>

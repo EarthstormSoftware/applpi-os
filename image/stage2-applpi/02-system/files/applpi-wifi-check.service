@@ -1,7 +1,8 @@
 [Unit]
 Description=ApplPi Wi-Fi check: setup mode if Wi-Fi doesn't connect
 After=applpi-settings.service systemd-networkd.service wpa_supplicant@wlan0.service
-ConditionPathExists=/run/applpi/wpa_supplicant-wlan0.conf
+# Written by apply-settings when the Pi has Wi-Fi settings and the fallback is on
+ConditionPathExists=/run/applpi/wifi-check
 ConditionPathExists=!/run/applpi/setup
 
 [Service]
