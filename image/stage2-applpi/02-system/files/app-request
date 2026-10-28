@@ -10,7 +10,13 @@ else, as root (sudo, in /etc/sudoers.d/020_applpi-app); each request is checked 
   app-request wifi-fallback <on|off> <after minutes> <for minutes>
                                 whether the Pi goes into setup mode when it has no network a while after starting, and
                                 for how long (from the next start)
-  app-request settings          prints {"time_zone", "ntp", "wifi_fallback"} as JSON
+  app-request wifi <ssid> [<country>]
+                                a new Wi-Fi network, its password on stdin (one line), from the next start (the app
+                                asks for a restart), on trial: if it doesn't connect within 5 minutes, the network
+                                before goes back. The country is the one set already, unless given (a Pi set up on
+                                Ethernet has none)
+  app-request networks          prints the Wi-Fi networks in range, strongest first, as JSON
+  app-request settings          prints {"time_zone", "ntp", "wifi_fallback", "wifi_ssid"} as JSON
   app-request restart           restarts the Pi
   app-request setup             restarts the Pi into setup mode, keeping its settings until new ones are saved there
                                 (to rename it, or change its Wi-Fi or SSH keys)
@@ -102,6 +108,27 @@ def apply_ntp(server):
     subprocess.run(["systemctl", "restart", "systemd-timesyncd.service"], check=True)
 
 
+def change_wifi(ssid, country, password):
+    """A new Wi-Fi network, from the next start, on trial (see apply-settings: WIFI_TRIAL)."""
+    rules = settings_rules()
+    settings = json.loads(SETTINGS.read_text(encoding="utf-8"))
+    before = settings.get("wifi")
+    country = country or (before or {}).get("country")
+    if not country:
+        raise RequestError("Give the Wi-Fi country (such as GB): this Pi has none set")
+    try:
+        wifi = rules.check_wifi({"country": country, "ssid": ssid, "password": password})
+    except rules.SettingsError as error:
+        raise RequestError(str(error)) from None
+    if not rules.WIFI_TRIAL.exists():  # on trial already: the one before that is still the one that worked
+        write(rules.WIFI_PREVIOUS, json.dumps(before or {}) + "\n", 0o600)
+    settings["wifi"] = wifi
+    write(SETTINGS, json.dumps(settings, indent=2) + "\n", 0o600)
+    write(rules.WIFI_TRIAL, "app\n", 0o600)
+    os.sync()
+    print(f"Wi-Fi: {ssid}, from the next start (back to the network before if it doesn't connect)")
+
+
 def update():
     if subprocess.run(["systemctl", "is-active", "--quiet", UPDATE_UNIT]).returncode == 0:
         raise RequestError("An update is already under way.")
@@ -153,10 +180,15 @@ def main():
             change_settings("wifi_fallback", fallback)
             print(f"Wi-Fi fallback: {'on' if fallback['enabled'] else 'off'}, after {fallback['after_minutes']} "
                   f"minutes, for {fallback['for_minutes']} (from the next start)")
+        elif len(args) in (2, 3) and args[0] == "wifi":
+            change_wifi(args[1], args[2] if len(args) == 3 else None, sys.stdin.readline().rstrip("\r\n"))
+        elif args == ["networks"]:
+            print(json.dumps(settings_rules().scan_wifi()))
         elif args == ["settings"]:
             settings = json.loads(SETTINGS.read_text(encoding="utf-8"))
             print(json.dumps({"time_zone": settings.get("timezone"), "ntp": settings.get("ntp", ""),
-                              "wifi_fallback": settings_rules().wifi_fallback(settings)}))
+                              "wifi_fallback": settings_rules().wifi_fallback(settings),
+                              "wifi_ssid": (settings.get("wifi") or {}).get("ssid")}))
         elif args == ["restart"]:
             subprocess.run(["systemctl", "reboot"], check=True)
         elif args == ["setup"]:

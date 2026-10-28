@@ -50,6 +50,10 @@ WIFI_CHECK = RUN_DIR / "wifi-check"
 # new, perhaps mistyped, so the fallback comes after TRIAL_MINUTES rather than after_minutes, and even when it's off.
 WIFI_PROVEN = Path("/data/settings/wifi-proven")
 TRIAL_MINUTES = 5
+# A network the app changed to (app-request wifi), on trial: if it doesn't connect within TRIAL_MINUTES, wifi-check
+# puts the one before back (give_up_wifi()) rather than starting setup mode. Both go once it has connected.
+WIFI_TRIAL = Path("/data/settings/wifi-trial")
+WIFI_PREVIOUS = Path("/data/settings/wifi-previous.json")
 
 HOSTNAME = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")
 COUNTRY = re.compile(r"[A-Z]{2}")
@@ -95,18 +99,7 @@ def check(raw: object) -> dict:
 
     wifi = raw.get("wifi")
     if wifi is not None:
-        if not isinstance(wifi, dict):
-            raise SettingsError("wifi must be an object with country, ssid and password")
-        country, ssid, password = wifi.get("country"), wifi.get("ssid"), wifi.get("password")
-        if not isinstance(country, str) or not COUNTRY.fullmatch(country):
-            raise SettingsError("wifi.country must be a two-letter country code, such as GB")
-        if not isinstance(ssid, str) or not 1 <= len(ssid.encode()) <= 32:
-            raise SettingsError("wifi.ssid must be 1-32 bytes")
-        if (not isinstance(password, str) or not 8 <= len(password) <= 63 or not password.isascii()
-                or not password.isprintable()):
-            raise SettingsError("wifi.password must be 8-63 printable ASCII characters")
-        psk = hashlib.pbkdf2_hmac("sha1", password.encode(), ssid.encode(), 4096, 32).hex()
-        settings["wifi"] = {"country": country, "ssid": ssid, "psk": psk}
+        settings["wifi"] = check_wifi(wifi)
 
     fallback = raw.get("wifi_fallback")
     if fallback is not None:
@@ -127,6 +120,68 @@ def check(raw: object) -> dict:
         settings["host_key"] = host_key
 
     return settings
+
+
+def check_wifi(wifi: object) -> dict:
+    """{"country", "ssid", "password"} checked, as kept: {"country", "ssid", "psk"}. Raises SettingsError."""
+    if not isinstance(wifi, dict):
+        raise SettingsError("wifi must be an object with country, ssid and password")
+    country, ssid, password = wifi.get("country"), wifi.get("ssid"), wifi.get("password")
+    if not isinstance(country, str) or not COUNTRY.fullmatch(country):
+        raise SettingsError("wifi.country must be a two-letter country code, such as GB")
+    if not isinstance(ssid, str) or not 1 <= len(ssid.encode()) <= 32:
+        raise SettingsError("wifi.ssid must be 1-32 bytes")
+    if (not isinstance(password, str) or not 8 <= len(password) <= 63 or not password.isascii()
+            or not password.isprintable()):
+        raise SettingsError("wifi.password must be 8-63 printable ASCII characters")
+    psk = hashlib.pbkdf2_hmac("sha1", password.encode(), ssid.encode(), 4096, 32).hex()
+    return {"country": country, "ssid": ssid, "psk": psk}
+
+
+def scan_wifi(exclude: str = "") -> list:
+    """The Wi-Fi networks in range, strongest first. Raises OSError if the dongle can't scan."""
+    networks = {}
+    for args in (["scan"], ["scan", "ap-force"]):
+        result = subprocess.run(["iw", "dev", "wlan0", *args], capture_output=True, text=True)
+        if result.returncode == 0:
+            break
+    else:
+        raise OSError(result.stderr.strip() or "iw failed")
+    signal = None
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if line.startswith("signal:"):
+            signal = float(line.split()[1])
+        elif line.startswith("SSID: "):
+            # iw writes bytes outside printable ASCII as \xNN
+            name = re.sub(rb"\\x([0-9a-f]{2})", lambda m: bytes([int(m.group(1), 16)]),
+                          line[6:].encode("latin-1", "replace")).decode("utf-8", "replace")
+            level = signal if signal is not None else -100
+            if name and name != exclude and (name not in networks or level > networks[name]):
+                networks[name] = level
+    return sorted(networks, key=networks.get, reverse=True)
+
+
+def give_up_wifi() -> bool:
+    """The network the app changed to didn't connect: the one before goes back into the settings. True if there was
+    one to put back."""
+    if not WIFI_TRIAL.exists():
+        return False
+    try:
+        before = json.loads(WIFI_PREVIOUS.read_text(encoding="utf-8"))
+        settings = json.loads(SETTINGS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        WIFI_TRIAL.unlink(missing_ok=True)
+        return False
+    if before:
+        settings["wifi"] = before
+    else:
+        settings.pop("wifi", None)
+    write(SETTINGS, json.dumps(settings, indent=2) + "\n", 0o600)
+    WIFI_PREVIOUS.unlink(missing_ok=True)
+    WIFI_TRIAL.unlink(missing_ok=True)
+    os.sync()
+    return True
 
 
 def check_wifi_fallback(raw: object) -> dict:
@@ -296,4 +351,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--wifi-give-up"]:  # from wifi-check
+        sys.exit(0 if give_up_wifi() else 1)
     sys.exit(main())

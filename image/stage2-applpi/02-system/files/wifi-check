@@ -17,11 +17,21 @@ if /usr/lib/applpi/os-update status 2> /dev/null | grep -qx 'tryboot=1'; then
 fi
 if /usr/lib/systemd/systemd-networkd-wait-online --any --operational-state=routable --timeout="$WAIT_SECONDS"; then
 	# Connected over Wi-Fi (not only Ethernet): these settings work, so the long wait is theirs from now on
-	if [ -n "$PROVEN" ] && ip -4 -o addr show dev wlan0 scope global 2> /dev/null | grep -q inet &&
-		[ "$(cat "$PROVEN_FILE" 2> /dev/null)" != "$PROVEN" ]; then
-		echo "$PROVEN" > "$PROVEN_FILE.tmp" && mv "$PROVEN_FILE.tmp" "$PROVEN_FILE" && sync
-		echo "Wi-Fi connected: its settings are known to work"
+	if [ -n "$PROVEN" ] && ip -4 -o addr show dev wlan0 scope global 2> /dev/null | grep -q inet; then
+		if [ "$(cat "$PROVEN_FILE" 2> /dev/null)" != "$PROVEN" ]; then
+			echo "$PROVEN" > "$PROVEN_FILE.tmp" && mv "$PROVEN_FILE.tmp" "$PROVEN_FILE"
+			echo "Wi-Fi connected: its settings are known to work"
+		fi
+		# A network the app changed to has passed its trial
+		rm -f /data/settings/wifi-trial /data/settings/wifi-previous.json
+		sync
 	fi
+	exit 0
+fi
+# A network the app changed to that didn't connect: back to the one before, rather than setup mode
+if /usr/lib/applpi/apply-settings --wifi-give-up; then
+	echo "The new Wi-Fi network didn't connect within $((WAIT_SECONDS / 60)) minutes: back to the one before"
+	systemctl --no-block reboot
 	exit 0
 fi
 # Without the Wi-Fi dongle there's no hotspot either

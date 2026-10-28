@@ -20,7 +20,6 @@ import importlib.util
 import ipaddress
 import json
 import os
-import re
 import socket
 import ssl
 import subprocess
@@ -85,26 +84,11 @@ class Setup:
 
     def scan(self):
         """The Wi-Fi networks in range, strongest first (the dongle scans while it runs the hotspot)."""
-        networks = {}
-        for args in (["scan"], ["scan", "ap-force"]):
-            result = subprocess.run(["iw", "dev", "wlan0", *args], capture_output=True, text=True)
-            if result.returncode == 0:
-                break
-        else:
-            say(f"Couldn't scan for Wi-Fi networks: {result.stderr.strip()}")
+        try:
+            self.networks = settings_rules.scan_wifi(exclude=SSID)
+        except OSError as error:
+            say(f"Couldn't scan for Wi-Fi networks: {error}")
             return
-        signal = None
-        for line in result.stdout.splitlines():
-            line = line.strip()
-            if line.startswith("signal:"):
-                signal = float(line.split()[1])
-            elif line.startswith("SSID: "):
-                # iw writes bytes outside printable ASCII as \xNN
-                name = re.sub(rb"\\x([0-9a-f]{2})", lambda m: bytes([int(m.group(1), 16)]),
-                              line[6:].encode("latin-1", "replace")).decode("utf-8", "replace")
-                if name and name != SSID and (name not in networks or signal > networks[name]):
-                    networks[name] = signal if signal is not None else -100
-        self.networks = sorted(networks, key=networks.get, reverse=True)
         say(f"{len(self.networks)} Wi-Fi networks in range")
 
     def save(self, form):
