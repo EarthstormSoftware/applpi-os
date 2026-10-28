@@ -345,6 +345,12 @@ with `applpi.json` skips setup mode.
   without settings, not on a Pi (setting it up again needs the Wi-Fi password).
 - A real phone on the hotspot (its sign-in page and the certificate warning): checked (2026-10-27). Released in
   v0.5.0 (2026-10-28).
+- Changing Wi-Fi without setup mode (asked for on 2026-10-28; for v0.6.0): `app-request wifi <ssid> [<country>]`,
+  the password on stdin, is used from the next start on trial. If it doesn't connect within 5 minutes, `wifi-check`
+  puts the network before back (`wifi-previous.json`, `wifi-trial`), so a mistyped password can't strand the Pi.
+  `app-request networks` lists the networks in range for the app's page. `wifi-check` now waits a minute for an IPv4
+  address before taking Wi-Fi settings as proven. App Base offers both on the app's page (the Unicorn's Device tab).
+  Checked on the Pi 2 (2026-10-28): a wrong password tried and the network before back in about 6 minutes.
 
 ## Then
 
