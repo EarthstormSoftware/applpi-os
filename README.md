@@ -70,8 +70,9 @@ starts in setup mode, as a Pico does (from the release after v0.4.0):
    asks. Restart, and the Pi is at `ssh applpi@<name>.local`.
 
 If Wi-Fi doesn't connect (a new router, a changed password), the Pi comes back to setup mode by itself: by default
-after 5 minutes without a network, for 10 minutes, keeping its settings until new ones are saved, then it tries Wi-Fi
-again. On the setup page this can be switched off, or the times changed (as `wifi_fallback` in `applpi.json`, see
+after 6 hours without a network (up to a day can be set, as a router can be slow back after a power cut), for 10
+minutes, keeping its settings until new ones are saved, then it tries Wi-Fi again. Wi-Fi settings it hasn't connected
+with yet, which may be mistyped, get 5 minutes instead. On the setup page this can be switched off, or the times changed (as `wifi_fallback` in `applpi.json`, see
 `image\applpi.example.json`). An app can also ask for setup mode, to rename the Pi, or for a factory reset.
 
 ## Updating a Pi's OS

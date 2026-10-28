@@ -8,7 +8,7 @@
   },
   "wifi_fallback": {
     "enabled": true,
-    "after_minutes": 5,
+    "after_minutes": 360,
     "for_minutes": 10
   },
   "ssh_keys": [

@@ -318,10 +318,13 @@ with `applpi.json` skips setup mode.
     Ethernet too, at `https://applpi-<last 4 digits of the serial>.local/`. When Wi-Fi didn't connect, it's on the
     hotspot only, for 10 minutes (more while the page is in use), keeping the name, keys and an empty password's
     Wi-Fi key, then the Pi restarts on its settings.
-  - `wifi-check` (`applpi-wifi-check.service`): with Wi-Fi settings but no routable network 5 minutes after
+  - `wifi-check` (`applpi-wifi-check.service`): with Wi-Fi settings but no routable network a while after
     starting, it writes `setup-next` and restarts. Not on a trial boot, which goes back instead.
-  - The Wi-Fi fallback is a setting (`wifi_fallback`: `enabled`, `after_minutes` 1-60, `for_minutes` 5-120;
-    defaults on, 5 and 10), since restarting by itself is a change the system makes on its own: in `applpi.json`, on
+  - The Wi-Fi fallback is a setting (`wifi_fallback`: `enabled`, `after_minutes` 1-1440, `for_minutes` 5-120;
+    defaults on, 360 and 10: up to a day, as a router can be slow back after a power cut, asked for on 2026-10-28),
+    since restarting by itself is a change the system makes on its own. Wi-Fi settings the Pi hasn't connected with
+    yet (a hash in `/data/settings/wifi-proven`, written by `wifi-check` once Wi-Fi connects) get 5 minutes, even with
+    the fallback off, so a mistyped password doesn't wait hours. The setting is in `applpi.json`, on
     the setup page, and from the app (`app-request wifi-fallback on|off <after> <for>`), so App Base can offer it on
     the app's page. The Picos should get the same three settings from App Base.
 - Checked on the Pi 2 (2026-10-27): a normal boot (all checks; the Wi-Fi check stops once Wi-Fi is up), the Wi-Fi

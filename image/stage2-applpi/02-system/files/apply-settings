@@ -41,10 +41,15 @@ SETUP_ADDRESS = "192.168.4.1"
 SETUP_NETWORK = Path("/run/systemd/network/05-setup.network")
 SERIAL = Path("/proc/device-tree/serial-number")
 # The Wi-Fi fallback (wifi-check): with no network after_minutes after starting, setup mode for for_minutes. Set in
-# the settings (applpi.json, the setup page, or the app by app-request); these are the defaults, and the limits.
-WIFI_FALLBACK = {"enabled": True, "after_minutes": 5, "for_minutes": 10}
-WIFI_FALLBACK_LIMITS = {"after_minutes": (1, 60), "for_minutes": (5, 120)}
+# the settings (applpi.json, the setup page, or the app by app-request); these are the defaults, and the limits. Up to
+# a day before, as a router can be slow back after a power cut.
+WIFI_FALLBACK = {"enabled": True, "after_minutes": 360, "for_minutes": 10}
+WIFI_FALLBACK_LIMITS = {"after_minutes": (1, 1440), "for_minutes": (5, 120)}
 WIFI_CHECK = RUN_DIR / "wifi-check"
+# Wi-Fi settings the Pi has connected with (a hash of the network and its password, written by wifi-check). Others are
+# new, perhaps mistyped, so the fallback comes after TRIAL_MINUTES rather than after_minutes, and even when it's off.
+WIFI_PROVEN = Path("/data/settings/wifi-proven")
+TRIAL_MINUTES = 5
 
 HOSTNAME = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")
 COUNTRY = re.compile(r"[A-Z]{2}")
@@ -137,6 +142,11 @@ def check_wifi_fallback(raw: object) -> dict:
     return fallback
 
 
+def wifi_fingerprint(wifi: dict) -> str:
+    """Which Wi-Fi settings these are, without keeping them: a hash of the network and its password."""
+    return hashlib.sha256(f"{wifi['ssid']}\n{wifi['psk']}".encode()).hexdigest()
+
+
 def wifi_fallback(settings: dict) -> dict:
     """The Wi-Fi fallback as set, or the defaults."""
     return WIFI_FALLBACK | settings.get("wifi_fallback", {})
@@ -202,9 +212,16 @@ def apply(settings: dict) -> None:
 
     wifi = settings.get("wifi")
     fallback = wifi_fallback(settings)
-    if wifi and fallback["enabled"] and not SETUP.exists():
-        # For wifi-check (applpi-wifi-check.service runs only with this)
-        write(WIFI_CHECK, f"WAIT_SECONDS={fallback['after_minutes'] * 60}\n", 0o644)
+    if wifi and not SETUP.exists():
+        proven = wifi_fingerprint(wifi)
+        try:
+            known = WIFI_PROVEN.read_text(encoding="utf-8").strip() == proven
+        except OSError:
+            known = False
+        if not known or fallback["enabled"]:
+            # For wifi-check (applpi-wifi-check.service runs only with this)
+            minutes = fallback["after_minutes"] if known else min(TRIAL_MINUTES, fallback["after_minutes"])
+            write(WIFI_CHECK, f"WAIT_SECONDS={minutes * 60}\nPROVEN={proven}\n", 0o644)
     if wifi and not SETUP.exists():
         write(RUN_DIR / "wpa_supplicant-wlan0.conf",
               f"country={wifi['country']}\n"
