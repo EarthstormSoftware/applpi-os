@@ -340,7 +340,8 @@ with `applpi.json` skips setup mode.
   fallback's settings read, saved and refused out of range, and setup mode asked for from its page (the page saying
   so, on the hotspot, then back by itself). The factory reset was checked in a container and by the QEMU test's Pi
   without settings, not on a Pi (setting it up again needs the Wi-Fi password).
-- Still to do: a real phone on the hotspot (its sign-in page and the certificate warning).
+- A real phone on the hotspot (its sign-in page and the certificate warning): checked (2026-10-27). Released in
+  v0.5.0 (2026-10-28).
 
 ## Then
 
