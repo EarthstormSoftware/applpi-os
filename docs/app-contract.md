@@ -142,7 +142,8 @@ Changes to make before the contract is frozen, because they can't be added later
    app checks the version to know what it can ask for. App Base does this today by reading `app-request`'s source
    for a request's name, which works but makes the text of a script part of the contract.
 3. **App Base to use `APPLPI_OS`** for `os_requests`, `os_setup` and `os_wifi`, falling back to today's check only
-   on an OS from before v1.
+   on an OS from before v1. App Base also runs on Picos, with about 190 KB of heap and 640 KB of flash on the
+   smallest, so the check stays in `base/pi.py`, which a Pico's deploy leaves out: shared code doesn't change.
 4. **Exit status 2 for an unknown request**, kept as it is now, written down (above) so App Base can tell "not on
    this OS" from "refused".
 
