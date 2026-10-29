@@ -26,6 +26,8 @@ echo "== Details"
 	systemd-analyze blame | head -12
 	systemctl show -p RuntimeWatchdogUSec; cat /sys/class/watchdog/watchdog0/state 2>&1
 	sudo -n journalctl -b -u applpi-data -u applpi-settings -u applpi-os-check --no-pager
+	# SSH's connections this boot, with any it dropped (OpenSSH's penalties for connections that don't finish)
+	sudo -n journalctl -b -u ssh --no-pager | tail -40
 	systemctl status --no-pager --lines=5 applpi-app; sudo -n ls -l /data/app /data/app-state
 	bash /etc/update-motd.d/00-applpi | sed "s/\x1b\[[0-9;]*m//g" | tail -9
 	grep -A2 "OS slot" /etc/issue

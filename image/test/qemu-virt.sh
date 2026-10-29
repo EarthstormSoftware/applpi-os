@@ -195,6 +195,7 @@ run_boot() {
 			echo "SSH up" | tee -a "$work/out/summary.log"
 			# SSH answers before the boot has finished: wait for that, so the checks see the booted system
 			ssh_pi 'systemctl is-system-running --wait' 2>&1 | sed 's/^/System: /' | tee -a "$work/out/summary.log"
+			[ "${PIPESTATUS[0]}" != 255 ] || echo "System: SSH failed straight after (exit 255)" | tee -a "$work/out/summary.log"
 			return 0
 		fi
 		kill -0 $qemu 2>/dev/null || break
@@ -226,7 +227,8 @@ checks() {
 			grep "^FAILED" "$log" | tee -a "$work/out/summary.log" || echo "All checks passed" | tee -a "$work/out/summary.log"
 			return 0
 		fi
-		echo "Checks on boot $1 couldn't run (attempt $attempt): $(tail -1 "$log")" | tee -a "$work/out/summary.log"
+		echo "Checks on boot $1 couldn't run (attempt $attempt, ssh exit $status): $(tail -1 "$log")" |
+			tee -a "$work/out/summary.log"
 		sleep 20
 	done
 	return 1
