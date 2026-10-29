@@ -13,10 +13,13 @@
                      started with no failed units, SSH and the network (and the app, if it was running before
                      the update, keeps running), or restarts into the permanent slot
   os-update fallback in emergency or rescue mode: on a trial boot, restarts into the permanent slot
+  os-update guard    from early in every boot (applpi-os-guard.service): on a trial boot, restarts into the permanent
+                     slot if the slot isn't kept within 10 minutes, however the boot went wrong
 
 The running slot is never written, and config.txt only changes on commit, so any failure, power cut or hang before
 then leaves the Pi starting the OS it had (a hang by way of the hardware watchdog, a kernel or initramfs failure by
-way of panic= on the kernel command line).
+way of panic= on the kernel command line, and a boot that never gets to its check, or stops part way with systemd
+still feeding the watchdog, by way of guard).
 """
 
 import hashlib
@@ -40,6 +43,8 @@ CHECK_STATE = Path("/run/applpi/os-check")
 # was running then, so the trial boot checks it too), UPDATE_TRIED (1 once tried) and UPDATE_RESULT (kept, or failed: why), which the trial boot's check sets, so the slot it goes back to can say why
 UPDATE_RECORD = Path("/data/.os-update-last")
 CHECK_SECONDS = 300
+# How long a trial boot has to be kept, from its start, before guard restarts it: the check's own time and more
+GUARD_SECONDS = 600
 # How long the app (if it was running before the update) must have kept running on a trial boot
 APP_SECONDS = 30
 # The root partition of each slot
@@ -518,9 +523,30 @@ def fallback():
         subprocess.run(["systemctl", "--no-block", "reboot"], check=True)
 
 
+def guard():
+    """On a trial boot, restarts into the permanent slot if the slot isn't kept within GUARD_SECONDS: for a boot
+    that never gets as far as its check (a service ahead of it that never finishes), or stops part way (the card no
+    longer answering, say) while systemd still feeds the hardware watchdog. It reads only /proc and /run (in memory),
+    and restarts by the kernel's SysRq, so it needs nothing else to work. (applpi-os-guard.service runs it at a
+    real-time priority, so busy tasks can't hold it up.)"""
+    if not tried():
+        return
+    deadline = time.monotonic() + GUARD_SECONDS
+    while time.monotonic() < deadline:
+        if CHECK_STATE.exists() and CHECK_STATE.read_text().strip() == "kept":
+            return
+        time.sleep(10)
+    say(f"The trial boot wasn't kept within {GUARD_SECONDS // 60} minutes: restarting into the permanent slot")
+    with open("/proc/sysrq-trigger", "w") as sysrq:
+        sysrq.write("s")  # what can still be written, is
+    time.sleep(3)
+    with open("/proc/sysrq-trigger", "w") as sysrq:
+        sysrq.write("b")
+
+
 def main():
     commands = {"status": status, "write": write, "try": try_slot, "commit": commit, "check": check,
-                "fallback": fallback}
+                "fallback": fallback, "guard": guard}
     args = sys.argv[1:]
     map_arg = next((arg for arg in args[1:] if arg.startswith("--map=")), None)
     if not args or args[0] not in commands or len(args) > (2 if args[0] == "write" and map_arg else 1):

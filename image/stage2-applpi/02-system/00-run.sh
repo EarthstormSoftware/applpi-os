@@ -38,7 +38,7 @@ install -m 644 files/applpi-setup.service files/applpi-wifi-check.service "${ROO
 
 # OS updates: a trial boot is kept once it's healthy, and otherwise (including a hang, by the hardware watchdog, or
 # emergency mode) the Pi restarts into the permanent slot
-install -m 644 files/applpi-os-check.service "${ROOTFS_DIR}/etc/systemd/system/"
+install -m 644 files/applpi-os-check.service files/applpi-os-guard.service "${ROOTFS_DIR}/etc/systemd/system/"
 install -d "${ROOTFS_DIR}/etc/systemd/system.conf.d"
 install -m 644 files/watchdog.conf "${ROOTFS_DIR}/etc/systemd/system.conf.d/applpi-watchdog.conf"
 for unit in emergency rescue; do
@@ -81,7 +81,7 @@ on_chroot <<- EOF
 	groupadd --system --gid 800 app
 	useradd --system --uid 800 --gid app --groups gpio,i2c,spi,video,input,dialout --home-dir /data/app-state \
 		--no-create-home --shell /usr/sbin/nologin app
-	systemctl enable applpi-data.service applpi-settings.service applpi-os-check.service applpi-app.service applpi-setup.service applpi-wifi-check.service systemd-networkd.service wpa_supplicant@wlan0.service ssh.service avahi-daemon.service
+	systemctl enable applpi-data.service applpi-settings.service applpi-os-check.service applpi-os-guard.service applpi-app.service applpi-setup.service applpi-wifi-check.service systemd-networkd.service wpa_supplicant@wlan0.service ssh.service avahi-daemon.service
 	# Only wlan0's: the D-Bus one was still enabled in the image after this disable, so it's masked, its D-Bus name too
 	systemctl disable wpa_supplicant.service
 	systemctl mask wpa_supplicant.service

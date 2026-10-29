@@ -16,7 +16,9 @@ is then deploy\<image>-broken-app.img.xz.
 
 With -Panic, the kernel crashes 10 seconds into the trial boot (SysRq c), and panic=10 restarts the Pi; with -Hang, the
 Pi stops 10 seconds in (a busy loop at the highest real-time priority on every core, with the kernel's limit on
-real-time tasks off, so nothing else runs, systemd included), and the hardware watchdog resets it. Either way the
+real-time tasks off). On a Pi 2 that stops the card answering while systemd still runs and feeds the watchdog, so it's
+the trial boot's guard (os-update guard) that restarts it, after 10 minutes; a hang that stops systemd too is the
+hardware watchdog's. Either way the
 trial is spent, so the Pi starts the permanent slot again. Both happen before the Pi's own check of the trial boot
 (applpi-os-check.service waits for them), so the slot can't be kept. The copies are -broken-panic and -broken-hang.
 
@@ -39,7 +41,7 @@ if (([int][bool]$App + [int][bool]$Panic + [int][bool]$Hang) -gt 1) { throw 'Cho
 $kind = if ($App) { 'broken-app' } elseif ($Panic) { 'broken-panic' } elseif ($Hang) { 'broken-hang' } else { 'broken' }
 $broken = $Image -replace '\.img\.xz$', "-$kind.img.xz"
 if ($Panic -or $Hang) {
-    $what = if ($Panic) { 'crashes the kernel' } else { 'stops the Pi (the hardware watchdog resets it)' }
+    $what = if ($Panic) { 'crashes the kernel' } else { 'stops the Pi (the guard or the watchdog restarts it)' }
     $action = if ($Panic) { 'echo c > /proc/sysrq-trigger' } else {
         # Every core busy at the highest real-time priority, with nothing kept back for other tasks
         @'

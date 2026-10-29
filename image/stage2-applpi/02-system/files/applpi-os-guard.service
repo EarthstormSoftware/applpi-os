@@ -1,0 +1,16 @@
+[Unit]
+Description=ApplPi OS update guard: restarts a trial boot that isn't kept within 10 minutes
+# From early in the boot, needing nothing but /proc and /run, so a boot that goes wrong anywhere is still caught
+DefaultDependencies=no
+Conflicts=shutdown.target
+Before=shutdown.target
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/applpi/os-update guard
+# Busy tasks mustn't hold it up; it only sleeps and reads a file
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=99
+
+[Install]
+WantedBy=sysinit.target
