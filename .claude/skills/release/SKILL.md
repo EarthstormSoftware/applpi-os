@@ -23,4 +23,5 @@ Then:
    with no `-dirty`.
 5. Run the full QEMU test with `/test-image` (not quick) on that image.
 6. Report the tag, the image and the test results. Don't push: ask the user whether to push `main` and the tag
-   (`git push origin main <version>`).
+   (`git push origin main <version>`). After the push, `/publish-release <version>` takes it from GitHub's draft to
+   the published release and the website.
