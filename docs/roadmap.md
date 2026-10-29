@@ -99,7 +99,11 @@ makes the slot permanent (`tryboot.txt` becomes `config.txt`); otherwise the Pi 
 `applpi` shows the verdict (`check=` in `os-update status`). The other ways a trial boot can fail also end in a
 restart into the old slot: a kernel panic or an initramfs that can't mount the root (`panic=10` on the kernel command
 line), a hang (systemd drives the BCM2835 hardware watchdog, 15 s), and emergency or rescue mode (their shells can't
-be used anyway, as root has no password). The running slot is never written, and a slot on trial can't be updated
+be used anyway, as root has no password). A boot that never gets to its check, or stops part way while systemd still
+feeds the watchdog (the card no longer answering, say), is restarted by `os-update guard`
+(`applpi-os-guard.service`, from early in the boot, at a real-time priority, reading only memory) if the slot isn't
+kept within 15 minutes. Whatever the cause, the next boot notes a trial that restarted before its check as failed
+("It restarted before it could check itself"), for `applpi` to show. The running slot is never written, and a slot on trial can't be updated
 until it's kept or left. The firmware isn't updated (only flashing changes it). The full QEMU test writes an update
 and boots the other slot, but QEMU can't do tryboot: the trial boot is checked on the Pi.
 
@@ -252,8 +256,12 @@ image.
 - Done (v0.2.0): the slots, `applpi update` and `os-update` (writing only the root's blocks that hold data, checked
   by reading back and `e2fsck`), the Pi's own check of a trial boot, the watchdog and `panic=10`, and both login
   screens showing the slot and the last update. Checked on the Pi 2: updates both ways, and an update to an image
-  with a failing service (`image\test\broken-image.ps1`) going back by itself, with the reason shown. Not yet
-  checked on the Pi: a hang or a kernel panic during a trial boot.
+  with a failing service (`image\test\broken-image.ps1`) going back by itself, with the reason shown.
+- Checked on the Pi 2 (2026-10-29): a kernel panic during a trial boot (`broken-image.ps1 -Panic`) back on the old
+  slot within a minute, and a hang (`-Hang`: every core busy at a real-time priority). The hang found a gap: the card
+  stopped answering but systemd kept feeding the watchdog, and the check never started, so the Pi sat on the trial
+  slot. `os-update guard` now restarts it (15 minutes after it started), and both come back saying the trial
+  restarted before it could check itself. Still to check: pulling the power during a trial boot.
 - Testing: `image\test\test-pi.ps1` updates the test Pi and runs the checks (`image\test\checks.sh`) on it, in
   about 7 minutes; the QEMU test, with the same checks, stays for what only a first boot does and for releases.
 

@@ -494,7 +494,8 @@ static class Program
         {
             // The Pi decides: it keeps the slot once it has started properly, or restarts into the old one
             Console.WriteLine($"{name} is up on slot {target}, checking itself (up to 5 minutes).");
-            after = WaitForCheck(pi, after, TimeSpan.FromMinutes(10));
+            // Longer than the Pi's own guard, which restarts a trial boot that isn't kept within 15 minutes
+            after = WaitForCheck(pi, after, TimeSpan.FromMinutes(20));
             if (after?.Permanent != target)
             {
                 var why = after?.Check is { } check && check.StartsWith("failed:", StringComparison.Ordinal)
@@ -510,7 +511,8 @@ static class Program
                 }
                 Console.Error.WriteLine(why is not null
                     ? $"{name} didn't keep slot {target}: it goes back to slot {before.Running}, as it was. {why}."
-                    : $"{name} didn't keep slot {target}: it goes back to slot {before.Running} at its next restart.");
+                    : $"{name} didn't keep slot {target} within 20 minutes: it goes back to slot {before.Running} at " +
+                        "its next restart, which it does by itself if it's stuck.");
                 return 1;
             }
         }
