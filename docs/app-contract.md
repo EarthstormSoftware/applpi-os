@@ -82,8 +82,8 @@ partition has the rest of the card, less the OS's own settings.
 
 ## The runtime
 
-- **Python 3.13** (Debian's `python3`), with its standard library. A newer Python 3 in a minor release only if apps
-  keep working; Python 4 or dropping a standard module apps use would be a major.
+- **Python 3.13 or later** (Debian's `python3`), with its standard library. A minor release may move to a newer
+  Python 3 once apps are checked on it; Python 4, or dropping a standard module apps use, would be a major.
 - **Libraries in the image** (compiled, so apps needn't compile anything): `rpi_ws281x` 5.0. Adding libraries is a
   minor; removing one, or a change to one that breaks its users, is a major.
 - An app's pure-Python libraries (Microdot, App Base) come in its own `lib/`.
