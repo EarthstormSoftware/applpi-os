@@ -193,9 +193,19 @@ run_boot() {
 	for _ in $(seq 120); do
 		if ssh_pi true 2>/dev/null; then
 			echo "SSH up" | tee -a "$work/out/summary.log"
+			# QEMU's network holds the connections tried while the Pi boots, and hands them to sshd together when it
+			# starts: it drops most (MaxStartups), and OpenSSH's penalties then refuse their address (all of QEMU's
+			# connections come from one) for some seconds. So the next connection is tried until that has passed.
 			# SSH answers before the boot has finished: wait for that, so the checks see the booted system
-			ssh_pi 'systemctl is-system-running --wait' 2>&1 | sed 's/^/System: /' | tee -a "$work/out/summary.log"
-			[ "${PIPESTATUS[0]}" != 255 ] || echo "System: SSH failed straight after (exit 255)" | tee -a "$work/out/summary.log"
+			local system
+			for _ in $(seq 6); do
+				if system=$(ssh_pi 'systemctl is-system-running --wait' 2>&1) || [ $? != 255 ]; then
+					echo "$system" | sed 's/^/System: /' | tee -a "$work/out/summary.log"
+					return 0
+				fi
+				sleep 10
+			done
+			echo "System: SSH refused straight after (exit 255, a minute of tries)" | tee -a "$work/out/summary.log"
 			return 0
 		fi
 		kill -0 $qemu 2>/dev/null || break
