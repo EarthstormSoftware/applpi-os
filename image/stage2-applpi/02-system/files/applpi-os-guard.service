@@ -1,5 +1,5 @@
 [Unit]
-Description=ApplPi OS update guard: restarts a trial boot that isn't kept within 10 minutes
+Description=ApplPi OS update guard: restarts a trial boot that isn't kept within 15 minutes
 # From early in the boot, needing nothing but /proc and /run, so a boot that goes wrong anywhere is still caught
 DefaultDependencies=no
 Conflicts=shutdown.target

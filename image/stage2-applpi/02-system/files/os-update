@@ -14,7 +14,7 @@
                      the update, keeps running), or restarts into the permanent slot
   os-update fallback in emergency or rescue mode: on a trial boot, restarts into the permanent slot
   os-update guard    from early in every boot (applpi-os-guard.service): on a trial boot, restarts into the permanent
-                     slot if the slot isn't kept within 10 minutes, however the boot went wrong
+                     slot if the slot isn't kept within 15 minutes, however the boot went wrong
 
 The running slot is never written, and config.txt only changes on commit, so any failure, power cut or hang before
 then leaves the Pi starting the OS it had (a hang by way of the hardware watchdog, a kernel or initramfs failure by
@@ -43,8 +43,9 @@ CHECK_STATE = Path("/run/applpi/os-check")
 # was running then, so the trial boot checks it too), UPDATE_TRIED (1 once tried) and UPDATE_RESULT (kept, or failed: why), which the trial boot's check sets, so the slot it goes back to can say why
 UPDATE_RECORD = Path("/data/.os-update-last")
 CHECK_SECONDS = 300
-# How long a trial boot has to be kept, from its start, before guard restarts it: the check's own time and more
-GUARD_SECONDS = 600
+# How long a trial boot has to be kept, from its start, before guard restarts it: the check's own 5 minutes start
+# only once the boot reaches multi-user, so with room for a slow one
+GUARD_SECONDS = 900
 # How long the app (if it was running before the update) must have kept running on a trial boot
 APP_SECONDS = 30
 # The root partition of each slot
@@ -492,14 +493,17 @@ def check():
         record = read_record()
         if record.get("UPDATE_TRIED") == "1" and "UPDATE_RESULT" not in record and record.get("UPDATE_SLOT") != slot:
             update_record(record["UPDATE_SLOT"], UPDATE_RESULT="failed: It restarted before it could check itself "
-                                                              "(a crash, a hang or a power cut)")
-        return
-    if prefix_slot(BOOT / "tryboot.txt") != slot or prefix_slot(BOOT / "config.txt") == slot:
+                                                              "(a crash, a hang, a boot that didn't finish, or a "
+                                                              "power cut)")
         return
 
     def note(text):
         CHECK_STATE.parent.mkdir(parents=True, exist_ok=True)
         CHECK_STATE.write_text(text + "\n")
+
+    if prefix_slot(BOOT / "tryboot.txt") != slot or prefix_slot(BOOT / "config.txt") == slot:
+        note("")  # a tryboot that isn't an update's trial: nothing to check, and nothing for guard to wait for
+        return
 
     note("checking")
     say(f"Slot {slot} is on trial: checking it")
@@ -533,9 +537,11 @@ def guard():
         return
     deadline = time.monotonic() + GUARD_SECONDS
     while time.monotonic() < deadline:
-        if CHECK_STATE.exists() and CHECK_STATE.read_text().strip() == "kept":
+        # Until the check has started and while it runs. Once it has decided, it commits the slot or restarts the Pi
+        # itself (a restart that hangs is the watchdog's, RebootWatchdogSec)
+        if CHECK_STATE.exists() and CHECK_STATE.read_text().strip() != "checking":
             return
-        time.sleep(10)
+        time.sleep(2)
     say(f"The trial boot wasn't kept within {GUARD_SECONDS // 60} minutes: restarting into the permanent slot")
     with open("/proc/sysrq-trigger", "w") as sysrq:
         sysrq.write("s")  # what can still be written, is

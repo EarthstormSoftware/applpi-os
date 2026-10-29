@@ -95,11 +95,24 @@ watchdog() {
 	[ "$(cat /sys/class/watchdog/watchdog0/state 2>/dev/null)" = active ] || { echo "the hardware watchdog isn't active"; return 1; }
 }
 
-# Only the services an ApplPi needs are running (and the update check, on a trial boot, the Wi-Fi check in the first
-# minutes, and the SSH user's session)
+# The guard of a trial boot (os-update guard): enabled, and finished without a fault, at once on a boot that isn't a
+# trial and once the check has decided on one (a trial boot that isn't kept is restarted, so never gets here)
+trial_guard() {
+	[ "$(systemctl is-enabled applpi-os-guard.service)" = enabled ] || { echo "applpi-os-guard isn't enabled"; return 1; }
+	local state result
+	for _ in 1 2 3 4 5; do
+		state=$(systemctl show -p SubState --value applpi-os-guard); result=$(systemctl show -p Result --value applpi-os-guard)
+		[ "$state" = dead ] && break
+		sleep 2
+	done
+	[ "$state" = dead ] && [ "$result" = success ] || { echo "applpi-os-guard is $state ($result)"; return 1; }
+}
+
+# Only the services an ApplPi needs are running (and the update check and its guard, on a trial boot, the Wi-Fi check
+# in the first minutes, and the SSH user's session)
 services() {
 	systemctl list-units --type=service --state=running --no-legend --plain | awk '{ print $1 }' | grep -vxE \
-		'applpi-(app|console-logo|os-check|wifi-check)\.service|avahi-daemon\.service|dbus\.service|(serial-)?getty@tty(1|AMA0)\.service|ssh\.service|systemd-(journald|logind|networkd|resolved|timesyncd|udevd|hostnamed)\.service|user@[0-9]+\.service|wpa_supplicant@wlan0\.service' \
+		'applpi-(app|console-logo|os-check|os-guard|wifi-check)\.service|avahi-daemon\.service|dbus\.service|(serial-)?getty@tty(1|AMA0)\.service|ssh\.service|systemd-(journald|logind|networkd|resolved|timesyncd|udevd|hostnamed)\.service|user@[0-9]+\.service|wpa_supplicant@wlan0\.service' \
 		&& return 1 || return 0
 }
 
@@ -189,6 +202,7 @@ check settings_applied "settings applied, applpi.json gone"
 check slot "running the permanent slot"
 [ "$mode" = qemu ] || check watchdog "hardware watchdog running"
 check services "only the expected services running"
+check trial_guard "the trial boot's guard is enabled, and done"
 check timers "no timers that change the system"
 check login_screens "login screens show the slot and the app"
 check app "the app runs, answers and is given APPLPI (if there is one)"
