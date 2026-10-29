@@ -43,7 +43,7 @@ Put the card in the PC's card reader and run:
 dotnet run --project src\ApplPi.Cli -- flash
 ```
 
-It writes the newest image you've built in `deploy\`, or else the latest release (`flash latest` or `flash v0.4.0`
+It writes the newest image you've built in `deploy\`, or else the latest release (`flash latest` or `flash v0.6.0`
 picks a release, downloaded and checked against its `SHA256SUMS`), to the card (only card readers are offered, and
 you type ERASE to confirm) and checks it, writing only the blocks that hold data. Then it asks for the Pi's name,
 Wi-Fi and time zone (the last Pi's are offered), makes you an SSH key if you don't have one, and puts the settings
@@ -57,7 +57,7 @@ this repository, and never in the image.
 ### Without applpi: setup mode
 
 A card written by any imager (Raspberry Pi Imager, balenaEtcher) from a release's image, with no settings on it,
-starts in setup mode, as a Pico does (from the release after v0.4.0):
+starts in setup mode, as a Pico does (from v0.5.0):
 
 1. The Pi starts an open Wi-Fi network, **ApplPi-SETUP** (with the Pi's Wi-Fi dongle). Join it from a phone or
    laptop: a phone shows its sign-in page, or open `http://192.168.4.1`. On Ethernet, the page is also at
@@ -72,8 +72,10 @@ starts in setup mode, as a Pico does (from the release after v0.4.0):
 If Wi-Fi doesn't connect (a new router, a changed password), the Pi comes back to setup mode by itself: by default
 after 6 hours without a network (up to a day can be set, as a router can be slow back after a power cut), for 10
 minutes, keeping its settings until new ones are saved, then it tries Wi-Fi again. Wi-Fi settings it hasn't connected
-with yet, which may be mistyped, get 5 minutes instead. On the setup page this can be switched off, or the times changed (as `wifi_fallback` in `applpi.json`, see
-`image\applpi.example.json`). An app can also ask for setup mode, to rename the Pi, or for a factory reset.
+with yet, which may be mistyped, get 5 minutes instead. On the setup page this can be switched off, or the times
+changed (as `wifi_fallback` in `applpi.json`, see `image\applpi.example.json`). An app can also ask for setup mode, to
+rename the Pi, or for a factory reset, and from v0.6.0 it can scan for networks and change the Pi's Wi-Fi without
+setup mode: on trial, so if the Pi can't connect within 5 minutes it goes back to the network it had.
 
 ## Updating a Pi's OS
 
