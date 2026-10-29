@@ -339,7 +339,7 @@ with `applpi.json` skips setup mode.
   (as the Wi-Fi fallback does, but with the page on Ethernet too, for wired Pis), and `app-request factory-reset`
   forgets them (name, Wi-Fi, keys, time zone) and restarts as a new Pi. The host key stays, and the app and its
   state (resetting those is the app's own reset). App Base offers them on the app's page (rename, the Wi-Fi fallback,
-  factory reset), shown only on an OS that has them. Checked on the Pi 2 with the Unicorn (2026-10-27): the
+  factory reset), shown only on an OS that has them. Checked on the Pi 2 with ApplPi Unicorn (2026-10-27): the
   fallback's settings read, saved and refused out of range, and setup mode asked for from its page (the page saying
   so, on the hotspot, then back by itself). The factory reset was checked in a container and by the QEMU test's Pi
   without settings, not on a Pi (setting it up again needs the Wi-Fi password).
@@ -349,10 +349,10 @@ with `applpi.json` skips setup mode.
   the password on stdin, is used from the next start on trial. If it doesn't connect within 5 minutes, `wifi-check`
   puts the network before back (`wifi-previous.json`, `wifi-trial`), so a mistyped password can't strand the Pi.
   `app-request networks` lists the networks in range for the app's page. `wifi-check` now waits a minute for an IPv4
-  address before taking Wi-Fi settings as proven. App Base offers both on the app's page (the Unicorn's Device tab).
+  address before taking Wi-Fi settings as proven. App Base offers both on the app's page (ApplPi Unicorn's Device tab).
   Checked on the Pi 2 (2026-10-28): a wrong password tried and the network before back in about 6 minutes. Checked
-  again with the release build (2026-10-29), updated over SSH on the Pi 2 and on the Unicorn's Pi: the wrong password
-  put back in about 6 minutes, the right one kept, the scan, and the Unicorn's page changing the network. Released in
+  again with the release build (2026-10-29), updated over SSH on the Pi 2 and on a second Pi: the wrong password
+  put back in about 6 minutes, the right one kept, the scan, and the app's page changing the network. Released in
   v0.6.0 (2026-10-29).
 
 ## Then
