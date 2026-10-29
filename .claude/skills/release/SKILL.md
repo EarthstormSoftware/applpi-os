@@ -10,6 +10,10 @@ Release ApplPi OS $ARGUMENTS.
 Before starting, check all of these and stop if one fails:
 - The version is `vX.Y.Z`, it's newer than the last tag (`git tag --sort=-v:refname`), and it isn't already tagged.
 - The working tree is clean and you're on `main`.
+- The app contract (`docs/app-contract.md`): if the commits since the last tag add anything apps can use (a request,
+  a manifest setting, an output field, a library, a group), the release is a minor (or major) one, `APPLPI` in
+  `image/stage2-applpi/02-system/files/app` is its `MAJOR.MINOR`, and the contract's "Since" column says so. If they
+  remove or change something apps rely on, it's a major release. From v1.0, `APPLPI_REQUIRED` stays true.
 - The work since the last tag has been checked on the real Pi 2. Ask the user if this conversation doesn't show it:
   QEMU can't check the boot logo, Wi-Fi or the screen.
 

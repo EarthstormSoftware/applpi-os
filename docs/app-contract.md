@@ -4,8 +4,8 @@ What an ApplPi app can rely on: how it's installed and run, what it may read and
 what it may ask the OS for. From v1.0 this is what ApplPi OS's version number protects. Everything not written here
 (the card layout, the A/B slots, `os-update`, the setup page, the login screens) may change in any release.
 
-**Status: draft for v1.0.** Sections marked *(before v1)* describe changes still to be made. The rest is how v0.6.0
-already works.
+**Status: draft for v1.0.** The changes it needed are made for the next release (see Before v1); one switch is left
+for v1.0 itself.
 
 ## Versions
 
@@ -17,9 +17,10 @@ ApplPi OS is versioned `MAJOR.MINOR.PATCH`, and the contract goes with it:
   library, a new group for the app user. An app made for 1.0 runs unchanged on every 1.x.
 - **Patch**: fixes, with no change an app can see except the fix.
 
-An app says which contract it needs in its manifest (`"applpi": "1.2"`: ApplPi OS 1.2 or a later 1.x), and can read
-the running OS's version at runtime. An app that uses something added in 1.2 says 1.2, so an older OS refuses it
-with a clear message ("needs ApplPi OS 1.2 or later") instead of starting it and failing later.
+An app says which contract it needs in its manifest (`"applpi": "1.2"`: ApplPi OS 1.2 or a later 1.x), and is told
+the one the OS gives in `APPLPI` (`"1.2"`), the version of the last release that added to the contract: a release
+that adds nothing for apps leaves it as it was. An app that uses something added in 1.2 says 1.2, so an older OS
+refuses it with a clear message ("needs ApplPi 1.2 or later") instead of starting it and failing later.
 
 Rules for both sides, so additions never break anything:
 - The OS never removes a request, a manifest setting or an output field within a major version, and never changes
@@ -39,7 +40,7 @@ In the app's folder, beside `main.py`:
 
 | Setting | Required | Meaning |
 |---|---|---|
-| `applpi` | yes *(before v1)* | The contract the app needs, `"MAJOR.MINOR"`. Refused if the OS's major differs, or its minor is lower. |
+| `applpi` | yes (from v1.0) | The contract the app needs, `"MAJOR.MINOR"`. Refused if the OS's major differs, or its minor is lower. |
 | `name` | yes | Lowercase letters, digits and hyphens, 1 to 32, not starting or ending with a hyphen. Installing an app with another name starts it with empty state. |
 | `version` | yes | Letters, digits and `.` `_` `+` `-`, up to 32. Shown on the login screens and to the app's own update. |
 | `root` | no (false) | Run as root, for libraries that need `/dev/mem` (`rpi_ws281x`). Otherwise the app runs as the `app` user. |
@@ -68,7 +69,7 @@ partition has the rest of the card, less the OS's own settings.
 - **User**: `app` (uid and gid 800), in the groups `gpio`, `i2c`, `spi`, `video`, `input` and `dialout`, and allowed
   to listen on ports below 1024. `root: true` runs it as root instead.
 - **Environment**: `PYTHONPATH=/data/app/lib`, `PYTHONUNBUFFERED=1`, `PYTHONDONTWRITEBYTECODE=1`,
-  `APPLPI_STATE=/data/app-state`, `HOME=/data/app-state`, and *(before v1)* `APPLPI_OS=<the OS version>`.
+  `APPLPI_STATE=/data/app-state`, `HOME=/data/app-state`, and `APPLPI`, the contract the OS gives (`"1.0"`).
 - **Its web page** is on port 80, at `http://<name>.local`, by convention (`applpi` and App Base expect it there).
   Nothing else on the Pi listens on 80. The app may listen on other ports too, on IPv4 and IPv6.
 - **Restarts**: whenever it stops, after 5 seconds, however often. Exit status 78 means "don't restart me" (a
@@ -133,19 +134,23 @@ splash, which services run, the packages beyond Python and the libraries above, 
 
 ## Before v1
 
-Changes to make before the contract is frozen, because they can't be added later without breaking something:
+Changes made before the contract is frozen, because they can't be added later without breaking something:
 
-1. **`applpi` in `app.json`**, required, checked as above. Today's apps (ApplPi Hello, ApplPi Unicorn) add
-   `"applpi": "1.0"` when they move to v1. Without it now, an OS can't tell an app made for a later 1.x from one it
-   can run, and the first app to use something new would fail at runtime instead of being refused.
-2. **`APPLPI_OS` in the app's environment**, the running OS's version (as `/etc/applpi-release`'s `VERSION`), so an
-   app checks the version to know what it can ask for. App Base does this today by reading `app-request`'s source
-   for a request's name, which works but makes the text of a script part of the contract.
-3. **App Base to use `APPLPI_OS`** for `os_requests`, `os_setup` and `os_wifi`, falling back to today's check only
-   on an OS from before v1. App Base also runs on Picos, with about 190 KB of heap and 640 KB of flash on the
-   smallest, so the check stays in `base/pi.py`, which a Pico's deploy leaves out: shared code doesn't change.
-4. **Exit status 2 for an unknown request**, kept as it is now, written down (above) so App Base can tell "not on
-   this OS" from "refused".
+1. **`applpi` in `app.json`**, checked as above (the `app` command's `check_applpi`). Without it, an OS can't tell
+   an app made for a later 1.x from one it can run, and the first app to use something new would fail at runtime
+   instead of being refused. The check comes before the one for unknown settings, so an app made for a later 1.x
+   gets "update the OS", not "unknown setting".
+2. **`APPLPI` in the app's environment**, so an app checks a version to know what it can ask for. App Base used to
+   read `app-request`'s source for a request's name, which made the text of a script part of the contract.
+3. **App Base uses `APPLPI`** for `os_requests`, `os_setup` and `os_wifi`, falling back to the old check on an OS
+   from before it. App Base also runs on Picos, with about 190 KB of heap and 640 KB of flash on the smallest, so
+   the check is in `base/pi.py`, which a Pico's deploy leaves out: shared code doesn't change.
+4. **Exit status 2 for an unknown request**, kept as it was, written down (above) so App Base can tell "not on this
+   OS" from "refused".
+
+Left for v1.0 itself: `APPLPI_REQUIRED` in the `app` command becomes true, so an `app.json` without `applpi` is
+refused. Until then it's taken, so apps from before it keep running while they gain it (an OS before this one
+refuses `applpi` as a setting it doesn't know, so an app adds it only once its Pis have this OS).
 
 ## Later (minor releases)
 

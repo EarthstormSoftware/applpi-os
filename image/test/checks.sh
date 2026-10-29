@@ -129,6 +129,11 @@ except urllib.error.HTTPError:
     pass
 except OSError as error:
     sys.exit(f"its web page: {error}")' || return 1
+	# The app is told this OS's ApplPi version (APPLPI, the app contract's)
+	local pid
+	pid=$(systemctl show -p MainPID --value applpi-app)
+	sudo -n cat "/proc/$pid/environ" | tr '\0' '\n' | grep -qxE 'APPLPI=[0-9]+\.[0-9]+' ||
+		{ echo "the app isn't given APPLPI"; return 1; }
 }
 
 # The compiled libraries for apps import, and the onboard audio is loaded unless the app uses the PWM hardware
@@ -186,7 +191,7 @@ check slot "running the permanent slot"
 check services "only the expected services running"
 check timers "no timers that change the system"
 check login_screens "login screens show the slot and the app"
-check app "the app runs and answers (if there is one)"
+check app "the app runs, answers and is given APPLPI (if there is one)"
 check libraries "the libraries for apps import, audio as the app needs"
 check sudo_works "sudo works for the admin user"
 check app_requests "the app may ask app-request, and only that"

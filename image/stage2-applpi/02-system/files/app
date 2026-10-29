@@ -2,9 +2,11 @@
 """The app: one per Pi, like a Pico's firmware. It lives in /data/app and starts at main.py, with its pure-Python
 libraries in lib/, and keeps what it writes (settings and so on) in /data/app-state. Its manifest, app.json:
 
-  {"name": "hello", "version": "1.0.0", "root": false, "pwm": false}
+  {"applpi": "1.0", "name": "hello", "version": "1.0.0", "root": false, "pwm": false}
 
-name: lowercase letters, digits and hyphens; version: what the login screens show; root (optional): run as root, for
+applpi: the ApplPi version the app needs, "MAJOR.MINOR" (docs/app-contract.md): refused if this OS's major differs
+or its minor is lower, and the app is given this OS's as APPLPI; name: lowercase letters, digits and hyphens;
+version: what the login screens show; root (optional): run as root, for
 libraries that need it (rpi_ws281x). Otherwise it runs as the app user, with the hardware groups (GPIO, I2C, SPI,
 video, input, serial) and the right to use ports below 1024 (its web page is on port 80). pwm (optional): it uses
 the PWM hardware (WS2812 LEDs on GPIO 18, by rpi_ws281x), which the onboard audio also uses, so the audio driver is
@@ -37,7 +39,13 @@ STATE = Path("/data/app-state")
 INFO = Path("/run/applpi/app")
 SERVICE = "applpi-app.service"
 USER = "app"
-KEYS = {"name", "version", "root", "pwm"}
+KEYS = {"applpi", "name", "version", "root", "pwm"}
+# The ApplPi version this OS gives apps (docs/app-contract.md): the MAJOR.MINOR of the release that last added to
+# what apps can rely on. Raised in the release that adds something.
+APPLPI = "1.0"
+# Until v1.0, an app.json without "applpi" is still taken, so apps from before it run while they gain it
+APPLPI_REQUIRED = False
+LEVEL = re.compile(r"(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})")
 # The onboard (headphone) audio's driver, which uses the PWM hardware
 AUDIO_MODULE = "snd_bcm2835"
 NAME = re.compile(r"[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?")
@@ -60,6 +68,25 @@ def say(message):
     print(message, file=sys.stderr, flush=True)
 
 
+def check_applpi(needed):
+    """Refuses an app that needs an ApplPi this OS doesn't give (app.json's "applpi", "MAJOR.MINOR"; ... if it has
+    none)."""
+    if needed is ...:
+        if APPLPI_REQUIRED:
+            raise AppError(f'app.json doesn\'t say which ApplPi it needs ("applpi": "{APPLPI}", say).')
+        return
+    match = LEVEL.fullmatch(needed) if isinstance(needed, str) else None
+    if not match:
+        raise AppError('app.json\'s applpi must be "MAJOR.MINOR", such as "1.0".')
+    need = int(match[1]), int(match[2])
+    have = tuple(int(part) for part in APPLPI.split("."))
+    if need[0] < have[0]:
+        raise AppError(f"The app is made for ApplPi {need[0]}.x, and this OS gives ApplPi {APPLPI}: the app needs "
+                       "updating.")
+    if need > have:
+        raise AppError(f"The app needs ApplPi {needed} or later, and this OS gives ApplPi {APPLPI}: update the OS.")
+
+
 def manifest(folder):
     """The app in a folder: (name, version, root, pwm), from its app.json."""
     if not (folder / "main.py").is_file():
@@ -72,6 +99,8 @@ def manifest(folder):
         raise AppError(f"app.json isn't valid JSON: {error}") from None
     if not isinstance(data, dict):
         raise AppError("app.json isn't a JSON object.")
+    # The version first: an app made for a later ApplPi may have settings this OS doesn't know yet
+    check_applpi(data["applpi"] if "applpi" in data else ...)
     if unknown := set(data) - KEYS:
         raise AppError(f"app.json has settings ApplPi OS doesn't know: {', '.join(sorted(unknown))}.")
     name, version = data.get("name"), data.get("version")
@@ -117,6 +146,7 @@ def run():
         command = ["/usr/bin/setpriv", f"--reuid={USER}", f"--regid={USER}", "--init-groups",
                    "--inh-caps=+net_bind_service", "--ambient-caps=+net_bind_service", "--", *command]
     say(f"Starting {name} {version}{' as root' if root else ''}")
+    os.environ["APPLPI"] = APPLPI
     os.execv(command[0], command)
 
 
