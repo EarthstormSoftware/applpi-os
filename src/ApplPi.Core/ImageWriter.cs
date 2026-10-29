@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using Microsoft.Win32.SafeHandles;
 using SharpCompress.Compressors.Xz;
@@ -15,11 +16,12 @@ public readonly record struct WriteProgress(bool Verifying, long Bytes, long Tot
 }
 
 /// <summary>
-/// Writes an .img.xz image to a whole disk and reads it back to check it. Needs administrator rights. The card's
-/// partitions are dismounted and locked first, and the first block (the partition table) is written last, so Windows
-/// doesn't mount a half-written card. With a .bmap beside the image (see <see cref="BlockMap"/>), only the blocks
-/// holding data are written and checked: the file systems' free space, most of the image, is skipped. The check
-/// compares checksums of what was written with what the card reads back, so the image is only decompressed once.
+/// Writes an .img.xz image to a whole disk and reads it back to check it. Needs administrator rights (root on Linux).
+/// The card's partitions are dismounted (and on Windows locked) first, and the first block (the partition table) is
+/// written last, so the system doesn't mount a half-written card. With a .bmap beside the image (see
+/// <see cref="BlockMap"/>), only the blocks holding data are written and checked: the file systems' free space, most of
+/// the image, is skipped. The check compares checksums of what was written with what the card reads back, so the image
+/// is only decompressed once. The card is written and read without the system's cache, so the check reads the card.
 /// </summary>
 public static partial class ImageWriter
 {
@@ -32,10 +34,15 @@ public static partial class ImageWriter
 
     public static void Write(RemovableDisk disk, string imagePath, IProgress<WriteProgress>? progress = null)
     {
-        var volumeLocks = disk.DriveLetters.Select(LockVolume).ToList();
+        if (!OperatingSystem.IsWindows())
+        {
+            WriteLinux(disk, imagePath, progress);
+            return;
+        }
+        var volumeLocks = disk.Volumes.Select(LockVolume).ToList();
         try
         {
-            using var device = Open($@"\\.\PhysicalDrive{disk.Number}");
+            using var device = Open(disk.DevicePath);
             WriteTo(device, disk.Size, imagePath, progress);
             // Windows reads the new partition table and mounts the boot partition
             DeviceIoControl(device, IoctlDiskUpdateProperties);
@@ -43,6 +50,32 @@ public static partial class ImageWriter
         finally
         {
             volumeLocks.ForEach(handle => handle.Dispose());
+        }
+    }
+
+    static void WriteLinux(RemovableDisk disk, string imagePath, IProgress<WriteProgress>? progress)
+    {
+        foreach (var mountPoint in disk.Volumes)
+        {
+            Platform.Run("umount", mountPoint);
+        }
+        using (var device = Open(disk.DevicePath))
+        {
+            WriteTo(device, disk.Size, imagePath, progress);
+            // The kernel reads the new partition table (udev then adds the partitions, and a desktop may mount them)
+            if (Ioctl(Descriptor(device), BlkRrPart, 0) != 0)
+            {
+                throw new IOException($"The card was written, but the system didn't read its new partitions (error " +
+                    $"{Marshal.GetLastPInvokeError()}): take it out and put it back in.");
+            }
+        }
+        try
+        {
+            Platform.Run("udevadm", "settle", "--timeout=10");
+        }
+        catch (Exception error) when (error is IOException or System.ComponentModel.Win32Exception)
+        {
+            // Without udev (or slow), waiting for the boot partition copes
         }
     }
 
@@ -169,9 +202,10 @@ public static partial class ImageWriter
         return end;
     }
 
-    static SafeFileHandle LockVolume(char letter)
+    [SupportedOSPlatform("windows")]
+    static SafeFileHandle LockVolume(string driveLetter)
     {
-        var volume = Open($@"\\.\{letter}:");
+        var volume = Open($@"\\.\{driveLetter}");
         try
         {
             DeviceIoControl(volume, FsctlLockVolume);
@@ -185,8 +219,18 @@ public static partial class ImageWriter
         }
     }
 
+    /// <summary>
+    /// Opens a disk (or, for tests, a file) to write without the system's cache: unbuffered and write-through on
+    /// Windows, O_DIRECT and O_SYNC on Linux.
+    /// </summary>
     internal static SafeFileHandle Open(string path)
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            // .NET opens with O_DIRECT for this flag on Linux, as for FILE_FLAG_NO_BUFFERING on Windows
+            return File.OpenHandle(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None,
+                FileOptions.WriteThrough | (FileOptions)FileFlagNoBuffering);
+        }
         var handle = CreateFile(path, GenericRead | GenericWrite, FileShareRead | FileShareWrite, 0, OpenExisting,
             FileFlagNoBuffering | FileFlagWriteThrough, 0);
         if (handle.IsInvalid)
@@ -204,13 +248,28 @@ public static partial class ImageWriter
         }
     }
 
+    /// <summary>
+    /// Makes sure everything written is on the card. On Linux it also drops anything of the disk in the system's cache
+    /// (BLKFLSBUF, which a file doesn't have), so the check that follows reads the card.
+    /// </summary>
     static void FlushFileBuffers(SafeFileHandle device)
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            if (Fsync(Descriptor(device)) != 0)
+            {
+                throw new IOException($"Writing to the card failed (error {Marshal.GetLastPInvokeError()}).");
+            }
+            Ioctl(Descriptor(device), BlkFlsBuf, 0);
+            return;
+        }
         if (!FlushFileBuffersNative(device))
         {
             throw new IOException(new Win32Exception().Message);
         }
     }
+
+    static int Descriptor(SafeFileHandle handle) => (int)handle.DangerousGetHandle();
 
     /// <summary>Memory aligned to the sector size, which unbuffered disk I/O needs.</summary>
     sealed unsafe class AlignedBuffer(int size) : IDisposable
@@ -245,4 +304,14 @@ public static partial class ImageWriter
     [LibraryImport("kernel32.dll", EntryPoint = "FlushFileBuffers", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool FlushFileBuffersNative(SafeFileHandle file);
+
+    // Linux's block device ioctls (linux/fs.h): re-read the partition table, and flush and drop the disk's cache
+    const nuint BlkRrPart = 0x125F;
+    const nuint BlkFlsBuf = 0x1261;
+
+    [LibraryImport("libc", EntryPoint = "ioctl", SetLastError = true)]
+    private static partial int Ioctl(int descriptor, nuint request, nint argument);
+
+    [LibraryImport("libc", EntryPoint = "fsync", SetLastError = true)]
+    private static partial int Fsync(int descriptor);
 }

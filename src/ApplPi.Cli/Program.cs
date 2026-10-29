@@ -2,7 +2,6 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
-using System.Security.Principal;
 using System.Text;
 using ApplPi.Core;
 
@@ -10,17 +9,18 @@ namespace ApplPi.Cli;
 
 static class Program
 {
-    const string Usage = """
+    static readonly string Usage = $"""
         applpi: sets up Raspberry Pis running ApplPi OS
 
         Usage:
-          applpi flash [image]  Write the ApplPi OS image to a card in this PC's card reader, check it, then set it
-                                up as below. The image is a .img.xz file, or a release (latest, or a version such as
+          applpi flash [image]  Write the ApplPi OS image to a card in this computer's card reader, check it, then set
+                                it up as below. The image is a .img.xz file, or a release (latest, or a version such as
                                 v0.4.0), downloaded from GitHub and checked. It defaults to the newest image you've
-                                built in deploy\, or else the latest release. Asks for administrator rights; only card
+                                built in deploy{Path.DirectorySeparatorChar}, or else the latest release. {(OperatingSystem.IsWindows()
+                                    ? "Asks for administrator rights" : "Runs itself with sudo")}; only card
                                 readers are offered, and you confirm before writing.
           applpi setup [name]   Ask for a Pi's settings (name, Wi-Fi, time zone, SSH key) and put them on its card.
-                                Works on a card written with the ApplPi OS image, in this PC's card reader.
+                                Works on a card written with the ApplPi OS image, in this computer's card reader.
                                 The Pi reads them at its next boot, then deletes them from the card.
           applpi update [name] [image] [--yes]
                                 Update a Pi's OS over SSH (the image as for flash). The new OS
@@ -29,17 +29,23 @@ static class Program
           applpi forget <name>  Forget a Pi you no longer use: its saved settings and host key, and ssh's known host.
           applpi --version      Show this tool's version.
 
-        Settings are remembered in %APPDATA%\ApplPi (Wi-Fi passwords encrypted for your Windows account).
+        {(OperatingSystem.IsWindows()
+            ? @"Settings are remembered in %APPDATA%\ApplPi (Wi-Fi passwords encrypted for your Windows account)."
+            : "Settings are remembered in ~/.config/applpi, in a file only you can read (as ~/.ssh's keys are).")}
         """;
 
     static int Main(string[] args)
     {
+        // A boot partition applpi mounted (Linux) isn't left mounted if it's stopped
+        Console.CancelKeyPress += (_, _) => BootPartition.ReleaseAll();
         try
         {
             return args switch
             {
-                ["setup"] => Setup(null, ChooseCard()),
-                ["setup", var name] => Setup(name, ChooseCard()),
+                ["setup"] => Setup(null, elevated: false),
+                ["setup", "--elevated"] => Setup(null, elevated: true),
+                ["setup", var name] => Setup(name, elevated: false),
+                ["setup", var name, "--elevated"] => Setup(name, elevated: true),
                 ["flash"] => Flash(null, elevated: false),
                 ["flash", "--elevated"] => Flash(null, elevated: true),
                 ["flash", var image] => Flash(image, elevated: false),
@@ -139,14 +145,15 @@ static class Program
             {
                 return 1;
             }
-            if (!IsAdministrator())
+            if (!Platform.IsAdministrator)
             {
-                return RunElevated(["flash", image, "--elevated"]);
+                return RunElevated(["flash", image, "--elevated"], "Writing a card");
             }
         }
 
         var result = WriteCard(image);
-        if (elevated)
+        // Windows runs it in a window of its own, which would close before it could be read
+        if (elevated && OperatingSystem.IsWindows())
         {
             Console.WriteLine();
             Console.Write("Press Enter to close this window.");
@@ -169,10 +176,12 @@ static class Program
         {
             Console.WriteLine($"  {candidate.Description}");
         }
-        var numbers = disks.Select(candidate => candidate.Number.ToString(CultureInfo.InvariantCulture)).ToList();
-        var chosen = Ask("Write to disk number", disks.Count == 1 ? numbers[0] : null,
-            answer => numbers.Contains(answer) ? null : $"Choose one of: {string.Join(", ", numbers)}.");
-        var disk = disks.Single(candidate => candidate.Number.ToString(CultureInfo.InvariantCulture) == chosen);
+        // A Windows disk number, or a Linux device (sdb, or /dev/sdb)
+        var ids = disks.Select(candidate => OperatingSystem.IsWindows() ? candidate.Id : candidate.DevicePath).ToList();
+        string IdOf(string answer) => OperatingSystem.IsWindows() || answer.StartsWith('/') ? answer : $"/dev/{answer}";
+        var chosen = Ask(OperatingSystem.IsWindows() ? "Write to disk number" : "Write to disk", disks.Count == 1 ? ids[0] : null,
+            answer => ids.Contains(IdOf(answer)) ? null : $"Choose one of: {string.Join(", ", ids)}.");
+        var disk = disks[ids.IndexOf(IdOf(chosen))];
 
         Console.WriteLine($"""
 
@@ -204,30 +213,14 @@ static class Program
         }));
         Console.WriteLine("\rWritten and checked.                          ");
 
-        var card = WaitForBootPartition(disk.Number);
+        using var card = BootPartition.WaitFor(disk);
         if (card is null)
         {
-            Console.Error.WriteLine("Windows didn't show the card's boot partition: take the card out, put it back " +
+            Console.Error.WriteLine("The system didn't show the card's boot partition: take the card out, put it back " +
                 "in and run applpi setup.");
             return 1;
         }
         return Setup(null, card);
-    }
-
-    /// <summary>The boot partition of the card just written, once Windows has mounted it.</summary>
-    static BootPartition? WaitForBootPartition(int diskNumber)
-    {
-        for (var attempt = 0; attempt < 30; attempt++)
-        {
-            var letters = RemovableDisk.FindAll().FirstOrDefault(disk => disk.Number == diskNumber)?.DriveLetters ?? [];
-            var root = letters.Select(letter => $@"{letter}:\").FirstOrDefault(BootPartition.IsApplPi);
-            if (root is not null)
-            {
-                return new BootPartition(root, $"{root.TrimEnd('\\')} (boot partition)");
-            }
-            Thread.Sleep(1000);
-        }
-        return null;
     }
 
     /// <summary>Reports progress on the calling thread (Progress&lt;T&gt; would post it to the thread pool, out of order).</summary>
@@ -236,13 +229,31 @@ static class Program
         public void Report(T value) => report(value);
     }
 
-    static bool IsAdministrator() =>
-        new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
-
-    /// <summary>Runs this program again with administrator rights (Windows asks first), in its own window.</summary>
-    static int RunElevated(string[] args)
+    /// <summary>
+    /// Runs this program again with administrator rights: on Windows in its own window (Windows asks first), on Linux
+    /// with sudo in this terminal (which may ask for your password). why says what needs them, such as "Writing a card".
+    /// </summary>
+    static int RunElevated(string[] args, string why)
     {
-        Console.WriteLine("Writing a card needs administrator rights: continuing in a new window.");
+        if (!OperatingSystem.IsWindows())
+        {
+            Console.WriteLine($"{why} needs root: continuing with sudo.");
+            var start = new ProcessStartInfo("sudo") { UseShellExecute = false };
+            start.ArgumentList.Add(Environment.ProcessPath!);
+            // Run with dotnet (not as a published program), it needs the program's own file too
+            if (Path.GetFileNameWithoutExtension(Environment.ProcessPath) == "dotnet")
+            {
+                start.ArgumentList.Add(Environment.GetCommandLineArgs()[0]);
+            }
+            foreach (var arg in args)
+            {
+                start.ArgumentList.Add(arg);
+            }
+            using var sudo = Process.Start(start) ?? throw new InvalidOperationException("sudo didn't start.");
+            sudo.WaitForExit();
+            return sudo.ExitCode;
+        }
+        Console.WriteLine($"{why} needs administrator rights: continuing in a new window.");
         try
         {
             using var elevated = Process.Start(new ProcessStartInfo(Environment.ProcessPath!, args)
@@ -257,6 +268,31 @@ static class Program
         {
             Console.Error.WriteLine("Administrator rights weren't given: nothing was written.");
             return 1;
+        }
+    }
+
+    /// <summary>
+    /// applpi setup: the card in the card reader. On Linux, a card the desktop hasn't mounted can only be mounted by root,
+    /// so it runs itself again with sudo.
+    /// </summary>
+    static int Setup(string? name, bool elevated)
+    {
+        var cards = BootPartition.FindCards();
+        if (cards.Count == 0 && !elevated && !Platform.IsAdministrator && BootPartition.UnmountedCards() > 0)
+        {
+            return RunElevated(name is null ? ["setup", "--elevated"] : ["setup", name, "--elevated"],
+                "The card's boot partition isn't mounted, and mounting it");
+        }
+        try
+        {
+            return Setup(name, ChooseCard(cards));
+        }
+        finally
+        {
+            foreach (var card in cards)
+            {
+                card.Dispose();
+            }
         }
     }
 
@@ -316,7 +352,7 @@ static class Program
 
         Console.WriteLine($"""
 
-            Settings for {hostname} are on the card ({card.Root}), and ssh on this PC knows its host key.
+            Settings for {hostname} are on the card ({card.Name}), and ssh on this computer knows its host key.
             Eject the card, put it in the Pi and power it on. After a few minutes (the first boot also sets up the card):
               ssh applpi@{hostname}.local
             """);
@@ -578,9 +614,8 @@ static class Program
         return null;
     }
 
-    static BootPartition? ChooseCard()
+    static BootPartition? ChooseCard(IReadOnlyList<BootPartition> cards)
     {
-        var cards = BootPartition.FindCards();
         switch (cards.Count)
         {
             case 0:
@@ -612,13 +647,20 @@ static class Program
         var keepPassword = known is not null && known.Ssid == ssid && known.Password.Length > 0;
         var password = AskSecret(keepPassword ? "Wi-Fi password (Enter to keep the saved one)" : "Wi-Fi password",
             keepPassword ? known!.Password : null, SettingsRules.CheckPassword);
-        var country = Ask("Wi-Fi country", known?.Country is { Length: > 0 } c ? c : RegionInfo.CurrentRegion.TwoLetterISORegionName,
+        var country = Ask("Wi-Fi country", known?.Country is { Length: > 0 } c ? c : LocalCountry(),
             answer => SettingsRules.CheckCountry(answer.ToUpperInvariant())).ToUpperInvariant();
         return new WifiSettings(country, ssid, password);
     }
 
     static bool CreateKey(string keyFile)
     {
+        // Without someone at the keyboard, ssh-keygen would make it without a passphrase
+        if (Console.IsInputRedirected)
+        {
+            Console.Error.WriteLine($"You have no SSH key yet ({keyFile}): run applpi in a terminal, where ssh-keygen " +
+                "can ask for its passphrase, or make one with ssh-keygen first.");
+            return false;
+        }
         Console.WriteLine($"""
 
             You have no SSH key yet ({keyFile}): it's how you log in to the Pi. Making one now with ssh-keygen.
@@ -632,9 +674,22 @@ static class Program
         return false;
     }
 
-    /// <summary>This PC's time zone as an IANA name, the default for a new Pi.</summary>
-    static string LocalTimeZone() =>
-        TimeZoneInfo.TryConvertWindowsIdToIanaId(TimeZoneInfo.Local.Id, out var iana) ? iana : "Etc/UTC";
+    /// <summary>This computer's time zone as an IANA name (Linux's already is), the default for a new Pi.</summary>
+    static string LocalTimeZone() => TimeZoneInfo.Local.HasIanaId
+        ? TimeZoneInfo.Local.Id
+        : TimeZoneInfo.TryConvertWindowsIdToIanaId(TimeZoneInfo.Local.Id, out var iana) ? iana : "Etc/UTC";
+
+    /// <summary>
+    /// This computer's country, the default for a new Pi's Wi-Fi: Windows' region, or on Linux (where applpi runs without
+    /// the system's region data) the country of LANG, such as GB in en_GB.UTF-8. Null if neither gives one.
+    /// </summary>
+    static string? LocalCountry()
+    {
+        var country = OperatingSystem.IsWindows()
+            ? RegionInfo.CurrentRegion.TwoLetterISORegionName
+            : Environment.GetEnvironmentVariable("LANG")?.Split('.', '@')[0].Split('_') is [_, var region] ? region : "";
+        return SettingsRules.CheckCountry(country) is null ? country : null;
+    }
 
     /// <summary>Asks until the answer passes the check; Enter takes the default.</summary>
     static string Ask(string prompt, string? defaultValue, Func<string, string?> check, bool allowEmpty = false)

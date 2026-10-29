@@ -3,7 +3,7 @@ using System.Diagnostics;
 namespace ApplPi.Core;
 
 /// <summary>
-/// Runs commands on a Pi over SSH, as its admin user, with Windows' OpenSSH (so the user's keys, agent and
+/// Runs commands on a Pi over SSH, as its admin user, with the system's OpenSSH (so the user's keys, agent and
 /// known_hosts work as they do for ssh itself).
 /// </summary>
 public sealed class PiShell(string host)

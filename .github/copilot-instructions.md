@@ -11,7 +11,7 @@ the image).
 - The image is Raspberry Pi OS Lite (Trixie, armhf) built with pi-gen, by GitHub Actions or locally with Docker.
 - Root filesystem read-only; per-Pi state (settings, Wi-Fi, SSH host keys, apps) lives on the data partition.
 - Two OS slots (A/B), chosen by `os_prefix` in `config.txt`; an update only writes the inactive slot.
-- Windows tools: `applpi`, a .NET command line, later with a WinUI flashing app on the same code.
+- Tools for Windows and Linux: `applpi`, a .NET command line, later with an Avalonia flashing app on the same code.
 
 ## Rules
 - Keep the image minimal: every package and enabled service needs a reason. Nothing listens on the network except

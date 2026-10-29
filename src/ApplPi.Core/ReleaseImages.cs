@@ -7,15 +7,14 @@ namespace ApplPi.Core;
 
 /// <summary>
 /// The published images: each ApplPi OS release on GitHub carries applpi-os-&lt;version&gt;.img.xz, its .bmap and
-/// SHA256SUMS. A download is kept in %LOCALAPPDATA%\ApplPi\images and checked against SHA256SUMS, so a release is only
-/// fetched once, and a damaged or altered download is never used.
+/// SHA256SUMS. A download is kept in %LOCALAPPDATA%\ApplPi\images (~/.cache/applpi/images on Linux) and checked against
+/// SHA256SUMS, so a release is only fetched once, and a damaged or altered download is never used.
 /// </summary>
 public static partial class ReleaseImages
 {
     const string Repository = "EarthstormSoftware/applpi-os";
 
-    public static string Cache { get; } =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ApplPi", "images");
+    public static string Cache { get; } = Path.Combine(Platform.CacheDirectory, "images");
 
     [GeneratedRegex(@"^v\d+\.\d+\.\d+$")]
     private static partial Regex ReleaseVersion();
@@ -73,7 +72,7 @@ public static partial class ReleaseImages
         }
         var sums = ParseSums(http.GetStringAsync(sumsUrl).GetAwaiter().GetResult());
 
-        Directory.CreateDirectory(Cache);
+        Platform.CreateUserDirectory(Cache);
         var image = Path.Combine(Cache, imageName);
         Fetch(http, imageUrl, image, Expected(sums, imageName), (bytes, total) => progress(imageName, bytes, total));
         if (assets.TryGetValue(bmapName, out var bmapUrl))
@@ -116,6 +115,7 @@ public static partial class ReleaseImages
             throw new InvalidOperationException($"{Path.GetFileName(path)} didn't match its SHA-256: not used.");
         }
         File.Move(partial, path, overwrite: true);
+        Platform.GiveToUser(path);
     }
 
     static string Hash(string path)

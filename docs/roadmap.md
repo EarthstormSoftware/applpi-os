@@ -206,7 +206,24 @@ Windows-only, about 300 of the tool's 1,600 lines:
   (`secret-tool`).
 - `net10.0-windows` becomes `net10.0`, with Windows and Linux versions of the parts above.
 
-Testing it needs a Linux machine with a card reader (WSL2 doesn't see USB card readers without `usbipd`). macOS
+Testing it needs a Linux machine with a card reader: WSL2 with the reader passed through by
+[usbipd-win](https://github.com/dorssel/usbipd-win) (decided 2026-10-29, for v1), and a Pi running `applpi` with a
+reader in its USB port, which also checks it never offers the card it runs from.
+
+Built (2026-10-30), as above, in one `net10.0` program: `Platform` says where files go and whose they are (under
+sudo, the settings, SSH keys and known_hosts stay the user's, in their home and owned by them). On Linux the card
+readers come from `lsblk` (a USB disk with removable media, or an SD card on the MMC bus, and nothing on it mounted
+except where removable media go, which leaves out the disk the system runs from); the card is written with O_DIRECT
+and O_SYNC, flushed and its cache dropped (BLKFLSBUF) before the check reads it back, then the partition table is
+re-read (BLKRRPART); applpi mounts the boot partition itself in a temporary folder (no desktop needed), or uses it
+where a desktop mounted it; `devices.json` is in `~/.config/applpi`, readable only by its user, with secrets marked
+`plain:`. Linux builds are self-contained (`dotnet publish -r linux-x64` or `linux-arm`, about 75 MB) and without
+ICU (invariant globalization), so time zones are checked against the system's own time zone data.
+Checked (2026-10-30) on WSL2's Debian 13 with a USB card reader: a faulty card (writes accepted but not kept) was
+refused by the check; a good one was flashed with v0.6.0 downloaded from GitHub, set up (`applpi setup`, with sudo to
+mount it), booted in the Pi 2 with all checks passing, then updated from Debian (`applpi update`) to a newer build,
+kept on its trial boot. Under WSL, Debian can't resolve `.local` names (WSL's network is behind Windows'): an
+`/etc/hosts` line does. Still to check: `applpi` on a Pi, with a card reader in its USB port. macOS
 would be about as much again (`diskutil`, `/dev/rdiskN`, the Keychain). Best done before v1 and before the flash
 app (step 5), so the app is chosen once, and alongside published images, so a release can be downloaded and
 flashed on either without Docker.
@@ -268,8 +285,8 @@ image.
 
 ### 5. Flash app
 
-The flashing app: WinUI if it's for Windows only, [Avalonia](https://avaloniaui.net) (also .NET, on Windows,
-Linux and macOS) if `applpi` goes to Linux too (see Tools on Windows and Linux).
+The flashing app, in [Avalonia](https://avaloniaui.net) (.NET, on Windows, Linux and macOS), as `applpi` goes to
+Linux too (decided 2026-10-29, see Tools on Windows and Linux).
 
 ### 6. Check the test Pi
 

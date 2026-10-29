@@ -31,8 +31,14 @@ public static partial class SettingsRules
         ? null
         : "The name must be 1-63 lower-case letters, digits and hyphens, not starting or ending with a hyphen.";
 
+    /// <summary>
+    /// An IANA time zone name, such as Europe/London: one Windows knows (through ICU), or on Linux one in the system's
+    /// time zone data (applpi runs there without ICU).
+    /// </summary>
     public static string? CheckTimeZone(string timeZone) =>
-        timeZone.Contains('/') && TimeZoneInfo.TryConvertIanaIdToWindowsId(timeZone, out _)
+        timeZone.Contains('/') && (OperatingSystem.IsWindows()
+            ? TimeZoneInfo.TryConvertIanaIdToWindowsId(timeZone, out _)
+            : TimeZoneInfo.TryFindSystemTimeZoneById(timeZone, out var zone) && zone.HasIanaId)
             ? null
             : $"Unknown time zone: {timeZone}. Use a name such as Europe/London.";
 
