@@ -126,7 +126,8 @@ def status():
     print(f"permanent={prefix_slot(BOOT / 'config.txt') or ''}")
     print(f"waiting={prefix_slot(BOOT / 'tryboot.txt') or ''}")
     print(f"check={CHECK_STATE.read_text().strip() if CHECK_STATE.exists() else ''}")
-    # "<slot> <kept|failed: why>" from the last trial boot that got as far as its check
+    # "<slot> <kept|failed: why>" from the last trial boot: its check's verdict, or, if it restarted before its check,
+    # the next boot's note of that
     record = read_record()
     print(f"last={record['UPDATE_SLOT'] + ' ' + record['UPDATE_RESULT'] if 'UPDATE_RESULT' in record else ''}")
     # What this os-update can do, for applpi: write takes a block map
@@ -480,7 +481,15 @@ def app_state():
 
 def check():
     _, slot = running()
-    if not tried() or prefix_slot(BOOT / "tryboot.txt") != slot or prefix_slot(BOOT / "config.txt") == slot:
+    if not tried():
+        # Back from a trial boot that never got as far as its check: it crashed (panic=10), hung (the watchdog) or
+        # lost power, and this boot is the firmware's way back. Say so, as a check that failed would.
+        record = read_record()
+        if record.get("UPDATE_TRIED") == "1" and "UPDATE_RESULT" not in record and record.get("UPDATE_SLOT") != slot:
+            update_record(record["UPDATE_SLOT"], UPDATE_RESULT="failed: It restarted before it could check itself "
+                                                              "(a crash, a hang or a power cut)")
+        return
+    if prefix_slot(BOOT / "tryboot.txt") != slot or prefix_slot(BOOT / "config.txt") == slot:
         return
 
     def note(text):

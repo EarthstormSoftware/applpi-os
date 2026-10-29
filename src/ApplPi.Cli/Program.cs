@@ -500,6 +500,14 @@ static class Program
                 var why = after?.Check is { } check && check.StartsWith("failed:", StringComparison.Ordinal)
                     ? check["failed:".Length..].Trim()
                     : after?.FailureOf(target);
+                if (after is not null && after.Running != target)
+                {
+                    // It restarted during its check (a crash or a hang): already back on the old slot
+                    Console.Error.WriteLine($"{name} came back on slot {after.Running}: slot {target} started, but didn't " +
+                        $"keep running. {why ?? "It restarted before it could check itself"}.");
+                    Console.Error.WriteLine($"It still runs ApplPi OS {after.Holds(after.Running)}, as before.");
+                    return 1;
+                }
                 Console.Error.WriteLine(why is not null
                     ? $"{name} didn't keep slot {target}: it goes back to slot {before.Running}, as it was. {why}."
                     : $"{name} didn't keep slot {target}: it goes back to slot {before.Running} at its next restart.");

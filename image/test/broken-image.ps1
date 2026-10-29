@@ -14,11 +14,17 @@ With -App, the OS is fine but the app can't start under it (a drop-in for applpi
 so the trial boot is given up because the app isn't running, as an OS update that broke the app would be. The copy
 is then deploy\<image>-broken-app.img.xz.
 
+With -Panic, the kernel crashes 10 seconds into the trial boot (SysRq c), and panic=10 restarts the Pi; with -Hang, the
+Pi stops 10 seconds in (a busy loop at the highest real-time priority on every core, with the kernel's limit on
+real-time tasks off, so nothing else runs, systemd included), and the hardware watchdog resets it. Either way the
+trial is spent, so the Pi starts the permanent slot again. Both happen before the Pi's own check of the trial boot
+(applpi-os-check.service waits for them), so the slot can't be kept. The copies are -broken-panic and -broken-hang.
+
 .PARAMETER Image
 The image to break. Defaults to the newest in deploy\ that isn't already broken.
 #>
 [CmdletBinding()]
-param([string]$Image, [switch]$App)
+param([string]$Image, [switch]$App, [switch]$Panic, [switch]$Hang)
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot)
@@ -29,9 +35,49 @@ if (-not $Image) {
     if (-not $Image) { throw "No image in ${deploy}: build one with image\build.ps1" }
 }
 $Image = (Resolve-Path $Image).Path
-$kind = if ($App) { 'broken-app' } else { 'broken' }
+if (([int][bool]$App + [int][bool]$Panic + [int][bool]$Hang) -gt 1) { throw 'Choose one of -App, -Panic and -Hang.' }
+$kind = if ($App) { 'broken-app' } elseif ($Panic) { 'broken-panic' } elseif ($Hang) { 'broken-hang' } else { 'broken' }
 $broken = $Image -replace '\.img\.xz$', "-$kind.img.xz"
-if ($App) {
+if ($Panic -or $Hang) {
+    $what = if ($Panic) { 'crashes the kernel' } else { 'stops the Pi (the hardware watchdog resets it)' }
+    $action = if ($Panic) { 'echo c > /proc/sysrq-trigger' } else {
+        # Every core busy at the highest real-time priority, with nothing kept back for other tasks
+        @'
+echo -1 > /proc/sys/kernel/sched_rt_runtime_us
+for cpu in $(seq 0 $(($(nproc) - 1))); do
+	taskset -c "$cpu" chrt -f 99 sh -c 'while :; do :; done' &
+done
+wait
+'@
+    }
+    $breakage = @"
+mkdir -p /mnt/root/usr/local/sbin
+cat > /mnt/root/usr/local/sbin/applpi-test-fault <<'EOF'
+#!/bin/sh
+# Test only (image\test\broken-image.ps1 -$($kind -replace 'broken-', '')): $what during the trial boot
+sleep 10
+$action
+EOF
+chmod 755 /mnt/root/usr/local/sbin/applpi-test-fault
+cat > /mnt/root/etc/systemd/system/applpi-test-fault.service <<'EOF'
+# Test only (image\test\broken-image.ps1): $what 10 seconds into every boot, before the Pi checks a trial boot,
+# so an OS update to this image goes back
+[Unit]
+Description=Deliberate fault (ApplPi OS update test)
+DefaultDependencies=no
+After=local-fs.target
+Before=applpi-os-check.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/applpi-test-fault
+
+[Install]
+WantedBy=multi-user.target
+EOF
+ln -s /etc/systemd/system/applpi-test-fault.service /mnt/root/etc/systemd/system/multi-user.target.wants/
+"@
+} elseif ($App) {
     $breakage = @'
 mkdir -p /mnt/root/etc/systemd/system/applpi-app.service.d
 cat > /mnt/root/etc/systemd/system/applpi-app.service.d/test-broken.conf <<'EOF'
