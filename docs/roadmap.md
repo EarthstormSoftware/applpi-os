@@ -261,7 +261,8 @@ image.
   slot within a minute, and a hang (`-Hang`: every core busy at a real-time priority). The hang found a gap: the card
   stopped answering but systemd kept feeding the watchdog, and the check never started, so the Pi sat on the trial
   slot. `os-update guard` now restarts it (15 minutes after it started), and both come back saying the trial
-  restarted before it could check itself. Still to check: pulling the power during a trial boot.
+  restarted before it could check itself. Pulling the power during a trial boot does too: back on the old slot by
+  itself, with the same reason.
 - Testing: `image\test\test-pi.ps1` updates the test Pi and runs the checks (`image\test\checks.sh`) on it, in
   about 7 minutes; the QEMU test, with the same checks, stays for what only a first boot does and for releases.
 
@@ -285,7 +286,11 @@ What's listening, memory and CPU at rest, boot time, and pulling the power while
     and the app answering (with the shutdown and the firmware). `ldconfig` ran at every boot (1.3 s), as the
     read-only root looks freshly updated to systemd each time: now masked. The rest is checking and mounting the
     partitions (about 4.5 s, which a power cut needs) and the splash.
-- Still to do: pulling the power, repeatedly (needs a switchable plug, or hands).
+- Pulling the power (2026-10-29, by hand): while it ran with the app, 12 s into a boot (as the data partition is
+  checked and mounted), and while the app changed the time zone every second. Each time it came back by itself, the
+  data partition's journal was replayed and found clean, and all the checks passed. The last pull came between a
+  settings file's new copy and its rename: the Pi kept the previous settings, whole, and the unfinished `.tmp`
+  (written again from scratch by the next change).
 
 ### 7. Setup mode (before v1)
 
