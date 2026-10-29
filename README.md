@@ -14,11 +14,11 @@ as a Pico W, with Python, the network, USB and GPIO.
 - **No serial cable or screen needed:** the card is flashed from Windows with the Pi's name, Wi-Fi and SSH key, so it
   comes up on the network ready for SSH. Or, written by any imager, it starts a setup hotspot, as a Pico does.
 
-> **Status:** v0.4.0 runs on the Pi 2: set up with `applpi flash` (from a published image, or one you built),
-> updated over SSH with `applpi update` (A/B slots, going back by itself if a new OS doesn't start properly), and
-> running one app, deployed from its own repo, which can ask the OS for a few things (its own updates, the clock, a
-> restart). Setup mode (below) is done and comes in the next release. See the [roadmap](docs/roadmap.md) for the
-> design and the steps.
+> **Status:** v0.6.0 runs on the Pi 2: set up with `applpi flash` (from a published image, or one you built) or from
+> a phone in setup mode, updated over SSH with `applpi update` (A/B slots, going back by itself if a new OS doesn't
+> start properly), and running one app, deployed from its own repo, which can ask the OS for a few things (its own
+> updates, the clock, a restart, setup mode, and a new Wi-Fi network on trial). See the [roadmap](docs/roadmap.md)
+> for the design and the steps.
 
 ## What you need
 

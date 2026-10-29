@@ -350,7 +350,10 @@ with `applpi.json` skips setup mode.
   puts the network before back (`wifi-previous.json`, `wifi-trial`), so a mistyped password can't strand the Pi.
   `app-request networks` lists the networks in range for the app's page. `wifi-check` now waits a minute for an IPv4
   address before taking Wi-Fi settings as proven. App Base offers both on the app's page (the Unicorn's Device tab).
-  Checked on the Pi 2 (2026-10-28): a wrong password tried and the network before back in about 6 minutes.
+  Checked on the Pi 2 (2026-10-28): a wrong password tried and the network before back in about 6 minutes. Checked
+  again with the release build (2026-10-29), updated over SSH on the Pi 2 and on the Unicorn's Pi: the wrong password
+  put back in about 6 minutes, the right one kept, the scan, and the Unicorn's page changing the network. Released in
+  v0.6.0 (2026-10-29).
 
 ## Then
 
