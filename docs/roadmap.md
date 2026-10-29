@@ -112,6 +112,8 @@ from the card's disk ID and the slot's partition (`-02` for A, `-03` for B).
 
 ### Apps
 
+What an app can rely on, which v1.0 freezes, is in [the app contract](app-contract.md).
+
 - One app per Pi, like a Pico: a Pi does one job, and a second job means another Pi. Deploying a different app
   replaces the one that was there. (Several apps would need a port each, sharing of GPIO pins and the LED driver,
   and a deploy tool that lists and removes apps. If it's ever needed, the service becomes one per app.)
