@@ -46,7 +46,11 @@ def main() -> None:
         time.sleep(INTERVAL)
     bits_per_pixel = int((FRAMEBUFFER_INFO / "bits_per_pixel").read_text())
     stride = int((FRAMEBUFFER_INFO / "stride").read_text())
-    rows = logo_rows(bits_per_pixel, os.cpu_count() or 1)
+    # As many as fit across the screen, so a narrow one doesn't wrap them onto the next lines
+    screen_width = int((FRAMEBUFFER_INFO / "virtual_size").read_text().split(",")[0])
+    icon_width = int(SIZE.read_text().split()[0])
+    fits = max(1, (screen_width - 2 * MARGIN + GAP) // (icon_width + GAP))
+    rows = logo_rows(bits_per_pixel, min(os.cpu_count() or 1, fits))
     left = MARGIN * bits_per_pixel // 8
     positions = [(MARGIN + y) * stride + left for y in range(len(rows))]
 

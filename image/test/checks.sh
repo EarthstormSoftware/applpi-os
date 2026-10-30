@@ -129,6 +129,9 @@ login_screens() {
 	bash /etc/update-motd.d/00-juggle | grep -q "OS slot" || { echo "the SSH login screen has no slot"; return 1; }
 	grep -q "App  " /etc/issue || { echo "the console's text has no app"; return 1; }
 	bash /etc/update-motd.d/00-juggle | grep -q "App  " || { echo "the SSH login screen has no app"; return 1; }
+	! grep -q '@[A-Z_]*@' /etc/issue || { echo "the console's text has a placeholder left"; return 1; }
+	! grep -q '()' /etc/issue || { echo "the console's text has an empty model"; return 1; }
+	systemctl -q is-enabled juggle-console-logo.service || { echo "the console's icons aren't enabled"; return 1; }
 }
 
 # If there's an app: running, not restarting, and its web page answering (any HTTP answer will do)
