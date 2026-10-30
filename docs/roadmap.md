@@ -231,7 +231,10 @@ Checked (2026-10-30) on WSL2's Debian 13 with a USB card reader: a faulty card (
 refused by the check; a good one was flashed with v0.6.0 downloaded from GitHub, set up (`juggle setup`, with sudo to
 mount it), booted in the Pi 2 with all checks passing, then updated from Debian (`juggle update`) to a newer build,
 kept on its trial boot. Under WSL, Debian can't resolve `.local` names (WSL's network is behind Windows'): an
-`/etc/hosts` line does. Still to check: `juggle` on a Pi, with a card reader in its USB port. macOS
+`/etc/hosts` line does. Checked too (2026-10-30) on a Pi 2 running Juggle OS, with a card reader in its USB port
+(the `linux-arm` build, run from the data partition): it offered only the card in the reader, never the card it runs
+from, wrote v0.7.0 (795 MiB) through sudo, checked it, mounted its boot partition and read the image's version, and
+left nothing mounted. Without a terminal it won't make an SSH key (ssh-keygen would ask for a passphrase). macOS
 would be about as much again (`diskutil`, `/dev/rdiskN`, the Keychain). Best done before v1 and before the flash
 app (step 5), so the app is chosen once, and alongside published images, so a release can be downloaded and
 flashed on either without Docker.
