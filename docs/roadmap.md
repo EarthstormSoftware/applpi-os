@@ -316,7 +316,13 @@ Plan (2026-10-31), for v1.0: **Juggle Flash**, on Windows and Linux x64 (macOS l
   on Windows through UAC (Windows asks), on Linux through `pkexec` (the desktop asks for the password). It takes
   the image, the card and the settings, and reports progress and the result to the app over a named pipe (an
   elevated Windows process can't share the app's output), so nothing secret goes through a file or the command line.
-  The card is checked again in the elevated job before writing: it must still be the removable disk chosen.
+  The card is checked again in the elevated job before writing: it must still be the removable disk chosen. The job
+  then writes the settings to the card's boot partition too (on Windows as well, so it's one job), and ends by
+  ejecting the card safely, so the settings, written last, are on the card before it's taken out: on Windows as
+  Explorer's Eject (flush, dismount its volumes, eject the media; a card reader stays, empty), on Linux by flushing,
+  unmounting its partitions and ejecting the media (`eject`). On by default, as a "Safely eject the card when done"
+  box in the app, and in `juggle flash` and `juggle setup` too, with `--no-eject` to leave it mounted. The last
+  screen then says the card can be taken out.
 - **The window**: Avalonia's Fluent theme, light and dark, with Juggle OS's logo; MVVM (CommunityToolkit.Mvvm), so
   the view models are tested without a screen (Avalonia's headless tests).
 - **Shipped with the releases**: the image workflow also publishes the app for `win-x64` and `linux-x64` (one
