@@ -63,7 +63,9 @@ firmware is about 23 MB and a slot's boot files about 57 MB, so it holds both sl
 the build checks the other slot would fit twice over. (It can't grow once a Pi is in use, as the root slots follow
 it.) A 4 GB card keeps about 0.8 GiB for data. If the root outgrows its slot, apt's package lists, other
 locales and the docs (about 190 MB) can go: nothing is installed on the Pi itself. Root B and the data partition are created on first
-boot (`juggle-data.service`), the data partition filling the rest of the card. The SSH host key lives on the data
+boot (`juggle-data.service`), the data partition filling the rest of the card. It is always formatted then: a card
+flashed again still has the last OS's data partition in the same place, and its app, settings and update notes would
+otherwise come back (the QEMU test puts an old one there to check). The SSH host key lives on the data
 partition, so a Pi keeps the same identity across OS updates.
 
 ### Device settings and first boot

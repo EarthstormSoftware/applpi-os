@@ -18,8 +18,10 @@ part_dev() {
 	done
 }
 
+new_data=
 if [ -z "$(part_dev 3)" ] || [ -z "$(part_dev 4)" ]; then
 	echo "Laying out the card: root B and the data partition"
+	new_data=1
 	read -r slot_start slot_size < <(partx -g -o START,SECTORS -n 2 "$disk")
 	b_start=$((slot_start + slot_size))
 	data_start=$((b_start + slot_size))
@@ -41,9 +43,11 @@ if [ -z "$(part_dev 3)" ] || [ -z "$(part_dev 4)" ]; then
 fi
 
 data_dev=$(part_dev 4)
-if [ -z "$(blkid -o value -s TYPE "$data_dev")" ]; then
+# A data partition made on this boot is formatted even if a filesystem is found there: a card flashed again still has
+# the last OS's data partition in the same place, with its app, the app's state and settings
+if [ -n "$new_data" ] || [ -z "$(blkid -o value -s TYPE "$data_dev")" ]; then
 	echo "Formatting the data partition"
-	mkfs.ext4 -q -L juggle-data "$data_dev"
+	mkfs.ext4 -q -F -L juggle-data "$data_dev"
 fi
 
 if ! mountpoint -q /data; then

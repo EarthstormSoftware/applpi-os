@@ -25,6 +25,11 @@ unpack() {
 	xz -dc "$1" > "$img"
 	# The size of a "4 GB" card, the smallest that fits root B and the data partition
 	truncate -s 3780M "$img"
+	# A card flashed again still has the last OS's data partition where the first boot makes the new one: an old one is
+	# put there, which the first boot must format
+	local start size
+	read -r start size < <(sfdisk -d "$img" | awk -F'[=,]' -v p="${img}2" '$1 ~ p" " {print $2, $4}')
+	mkfs.ext4 -q -F -L old-data -E offset=$(( (start + 2 * size) * 512 )) "$img" 64M
 	mkdir -p /mnt/root "$work/overlayroot"
 	mount -o ro,loop,offset="$(offset 2)" "$img" /mnt/root
 	grep -E '^/(etc|usr)/' /mnt/root/var/lib/dpkg/info/overlayroot.list | while read -r f; do
@@ -66,6 +71,13 @@ boot() {
 
 	# The file written to /etc on the first boot must be gone on the second (the root's changes are in RAM)
 	if run_boot 1 && checks 1; then
+		local label
+		label=$(ssh_pi 'sudo -n blkid -s LABEL -o value "$(findmnt -no SOURCE /data)"' 2> /dev/null || true)
+		if [ "$label" = juggle-data ]; then
+			echo "The old data partition was formatted"
+		else
+			echo "FAILED  the first boot kept the old data partition (labelled ${label:-nothing})"
+		fi | tee -a "$out/summary.log"
 		ssh_pi 'sudo -n touch /etc/test-overlay' || true
 		if [ "$quick" != quick ]; then
 			update "$image_xz"
