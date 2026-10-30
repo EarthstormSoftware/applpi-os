@@ -299,6 +299,36 @@ image.
 The flashing app, in [Avalonia](https://avaloniaui.net) (.NET, on Windows, Linux and macOS), as `juggle` goes to
 Linux too (decided 2026-10-29, see Tools on Windows and Linux).
 
+Plan (2026-10-31), for v1.0: **Juggle Flash**, on Windows and Linux x64 (macOS later, as `juggle`):
+
+- **What it does**: one window that takes someone through flashing a card: the image (the latest release, another
+  release, or a file), the card (only removable card readers, with their size and name), the Pi's settings (name,
+  Wi-Fi, time zone, SSH key, the last Pi's offered as `juggle` does), a confirmation naming the card, then writing
+  and checking it with progress, and what to do next (eject it, then `ssh juggle@<name>.local` or the app's page).
+  Also: setting up a card that's already written, and a list of the Pis it knows, each with Update (over SSH, with
+  the same trial and progress as `juggle update`) and Forget.
+- **The same code as `juggle`**: the flows now in `Juggle.Cli`'s `Program.cs` (finding the image, flash, setup,
+  update with its waits for the trial boot) move into `Juggle.Core` as jobs that report progress and messages and
+  ask through an interface, so the command line asks in the terminal and the app in the window. `juggle` behaves as
+  before; the move comes with tests of the jobs.
+- **Admin rights only for the card**: the app runs as the user. Writing a card (and, on Linux, mounting its boot
+  partition) is done by `juggle` itself, shipped beside the app, started with administrator rights for that one job:
+  on Windows through UAC (Windows asks), on Linux through `pkexec` (the desktop asks for the password). It takes
+  the image, the card and the settings, and reports progress and the result to the app over a named pipe (an
+  elevated Windows process can't share the app's output), so nothing secret goes through a file or the command line.
+  The card is checked again in the elevated job before writing: it must still be the removable disk chosen.
+- **The window**: Avalonia's Fluent theme, light and dark, with Juggle OS's logo; MVVM (CommunityToolkit.Mvvm), so
+  the view models are tested without a screen (Avalonia's headless tests).
+- **Shipped with the releases**: the image workflow also publishes the app for `win-x64` and `linux-x64` (one
+  self-contained file each, with `juggle` beside it), versioned from the tag. It isn't code-signed, so Windows'
+  SmartScreen warns the first time; signing can come later.
+- **Tested**: the jobs and view models on the PC; flashing on Windows, and on Linux in WSL2's desktop (WSLg) with
+  the card reader passed through, then each card booted in the Pi 2 with all checks passing; an update of a Pi from
+  the app.
+
+Steps: the jobs into `Juggle.Core` (with `juggle` on them); the elevated job and its pipe; the app's skeleton; the
+screens; packaging in the workflow; testing on both; the README, the release notes and the website.
+
 ### 6. Check the test Pi
 
 What's listening, memory and CPU at rest, boot time, and pulling the power while it runs (repeatedly).
