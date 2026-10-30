@@ -6,7 +6,7 @@ listening that isn't needed. The OS is only changed by building and installing a
 their own, from their own repos, and an OS update never touches them.
 
 It was called ApplPi OS up to v0.6.0, and renamed Juggle OS on 2026-10-30, with a new logo: three balls on a juggler's
-figure of eight. Everything that carried the name changes with the next release (the `juggle` command and user, the
+figure of eight. Everything that carried the name changed with v0.7.0 (the `juggle` command and user, the
 `juggle-*` services, `/usr/lib/juggle`, `juggle.json` on the boot partition, the `Juggle-SETUP` hotspot,
 `"juggle"` in `app.json` and `JUGGLE` for apps). Nothing reads the old names: a Pi with an ApplPi OS release is
 flashed again, and the tools' saved devices move from `ApplPi` to `Juggle` by hand.

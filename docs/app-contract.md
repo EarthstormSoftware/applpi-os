@@ -4,7 +4,7 @@ What a Juggle app can rely on: how it's installed and run, what it may read and 
 what it may ask the OS for. From v1.0 this is what Juggle OS's version number protects. Everything not written here
 (the card layout, the A/B slots, `os-update`, the setup page, the login screens) may change in any release.
 
-**Status: draft for v1.0.** The changes it needed are made for the next release (see Before v1); one switch is left
+**Status: draft for v1.0.** The changes it needed are in v0.7.0 (see Before v1); one switch is left
 for v1.0 itself.
 
 ## Versions

@@ -19,14 +19,14 @@ as a Pico W, with Python, the network, USB and GPIO.
 - **No serial cable or screen needed:** the card is flashed from Windows with the Pi's name, Wi-Fi and SSH key, so it
   comes up on the network ready for SSH. Or, written by any imager, it starts a setup hotspot, as a Pico does.
 
-> **Status:** v0.6.0 runs on the Pi 2: set up with `juggle flash` (from a published image, or one you built) or from
-> a phone in setup mode, updated over SSH with `juggle update` (A/B slots, going back by itself if a new OS doesn't
-> start properly), and running one app, deployed from its own repo, which can ask the OS for a few things (its own
-> updates, the clock, a restart, setup mode, and a new Wi-Fi network on trial). See the [roadmap](docs/roadmap.md)
-> for the design and the steps.
+> **Status:** v0.7.0 runs on the Pi 2: set up with `juggle flash` on Windows or Linux (from a published image, or
+> one you built) or from a phone in setup mode, updated over SSH with `juggle update` (A/B slots, going back by itself
+> if a new OS doesn't start properly, hangs or loses power on trial), and running one app, deployed from its own repo,
+> which can ask the OS for a few things (its own updates, the clock, a restart, setup mode, and a new Wi-Fi network
+> on trial). See the [roadmap](docs/roadmap.md) for the design and the steps.
 
 > **New name:** Juggle OS was called ApplPi OS up to v0.6.0, and those releases keep the old names (the
-> `applpi-os-*.img.xz` images, the `applpi` command and the `applpi` user). From the next release it's Juggle OS
+> `applpi-os-*.img.xz` images, the `applpi` command and the `applpi` user). From v0.7.0 it's Juggle OS
 > throughout; a Pi with an ApplPi OS release is flashed again rather than updated.
 
 ## What you need
@@ -34,7 +34,7 @@ as a Pico W, with Python, the network, USB and GPIO.
 - A Raspberry Pi 2 and a microSD card of 4 GB or more (the card is laid out on first boot: two OS slots and a data
   partition filling the rest).
 - Windows 10 or 11 with the [.NET 10 SDK](https://dotnet.microsoft.com/download), Windows' OpenSSH client (`ssh`,
-  `ssh-keygen`, `scp`; installed by default) and a card reader.
+  `ssh-keygen`, `scp`; installed by default) and a card reader. Or Linux: see [On Linux](#on-linux).
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/), only to build the image yourself: the
   [releases](https://github.com/EarthstormSoftware/juggle-os/releases) have ready-made images.
 
@@ -52,7 +52,7 @@ Put the card in the PC's card reader and run:
 dotnet run --project src\Juggle.Cli -- flash
 ```
 
-It writes the newest image you've built in `deploy\`, or else the latest release (`flash latest` or `flash v0.6.0`
+It writes the newest image you've built in `deploy\`, or else the latest release (`flash latest` or `flash v0.7.0`
 picks a release, downloaded and checked against its `SHA256SUMS`), to the card (only card readers are offered, and
 you type ERASE to confirm) and checks it, writing only the blocks that hold data. Then it asks for the Pi's name,
 Wi-Fi and time zone (the last Pi's are offered), makes you an SSH key if you don't have one, and puts the settings
@@ -62,6 +62,21 @@ minutes, `ssh juggle@<name>.local`.
 
 Settings are kept in `%APPDATA%\Juggle`, Wi-Fi passwords and host keys encrypted for your Windows account: never in
 this repository, and never in the image.
+
+### On Linux
+
+From v0.7.0, `juggle` runs on Linux too (x64, or 32-bit ARM such as a Pi). Build it on any machine with the .NET 10
+SDK, as one self-contained file that needs no .NET on the Linux machine:
+
+```sh
+dotnet publish src/Juggle.Cli -r linux-x64 --self-contained -p:PublishSingleFile=true    # or -r linux-arm
+```
+
+It works as on Windows, except that writing a card needs root, so `flash` and `setup` run themselves again with
+`sudo` (the settings, SSH key and `known_hosts` stay yours, in your home); card readers are found with `lsblk` (USB
+disks with removable media, or an SD slot, never the disk the system runs from); `juggle` mounts the card's boot
+partition itself, so no desktop is needed; and settings are kept in `~/.config/juggle`, readable only by you, with
+Wi-Fi passwords and host keys not encrypted, as Linux has no per-user key like Windows' to encrypt them with.
 
 ### Without juggle: setup mode
 
