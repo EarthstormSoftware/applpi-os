@@ -1,0 +1,12 @@
+[Unit]
+Description=Juggle setup mode: the setup page
+After=juggle-settings.service systemd-networkd.service
+ConditionPathExists=/run/juggle/setup
+
+[Service]
+ExecStart=/usr/lib/juggle/setup
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

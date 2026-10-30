@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-Builds the ApplPi OS image with Docker.
+Builds the Juggle OS image with Docker.
 
 .DESCRIPTION
 Runs pi-gen in a privileged Linux container (Docker Desktop on Windows, or any Docker host) and copies the image,
@@ -17,7 +17,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot
 $deploy = Join-Path $repo 'deploy'
-$container = 'applpi-os-build'
+$container = 'juggle-os-build'
 
 function Invoke-Docker {
     # Docker writes progress to stderr, which Windows PowerShell turns into errors when output is redirected:
@@ -39,18 +39,18 @@ $commit = git -C $repo rev-parse --short HEAD
 if ($LASTEXITCODE -ne 0) { throw 'Could not read the version from git.' }
 # When it was built, in UTC: 20261016-2249
 $buildStamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmm')
-Write-Host "Building ApplPi OS $version (build $buildStamp UTC)"
+Write-Host "Building Juggle OS $version (build $buildStamp UTC)"
 
-Invoke-Docker build --platform linux/386 --tag applpi-os-builder $PSScriptRoot
+Invoke-Docker build --platform linux/386 --tag juggle-os-builder $PSScriptRoot
 
 if (docker ps --all --quiet --filter "name=^$container$") {
     Invoke-Docker rm --force --volumes $container | Out-Null
 }
 try {
     # pi-gen's work folder is kept in a volume between builds, for -Quick
-    Invoke-Docker run --name $container --privileged --volume applpi-os-work:/pi-gen/work `
-        --env "APPLPI_VERSION=$version" --env "APPLPI_COMMIT=$commit" --env "APPLPI_BUILD_STAMP=$buildStamp" `
-        --env "APPLPI_QUICK=$([int]$Quick.IsPresent)" applpi-os-builder ./build-in-container.sh
+    Invoke-Docker run --name $container --privileged --volume juggle-os-work:/pi-gen/work `
+        --env "JUGGLE_VERSION=$version" --env "JUGGLE_COMMIT=$commit" --env "JUGGLE_BUILD_STAMP=$buildStamp" `
+        --env "JUGGLE_QUICK=$([int]$Quick.IsPresent)" juggle-os-builder ./build-in-container.sh
 }
 finally {
     New-Item -ItemType Directory -Force $deploy | Out-Null

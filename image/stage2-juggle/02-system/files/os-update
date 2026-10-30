@@ -1,0 +1,576 @@
+#!/usr/bin/python3
+"""Juggle OS updates (A/B slots). Run as root; juggle update on Windows runs these over SSH.
+
+  os-update status   which slot is running, which is permanent, which is waiting to be tried, and what each holds
+  os-update write [--map=<start>-<end>,...]
+                     reads a Juggle OS image (.img.xz) on stdin and writes it into the slot that isn't running:
+                     its root partition (checked by reading it back, and with e2fsck) and its boot files, then
+                     tryboot.txt. With the image's block map (byte ranges from its .bmap, end exclusive), only the
+                     root's parts that hold data are written.
+  os-update try      restarts into the written slot, for one boot (the firmware's tryboot)
+  os-update commit   makes the running slot permanent (config.txt), after a tryboot into it
+  os-update check    at every boot (juggle-os-check.service): on a trial boot, commits the slot once the system has
+                     started with no failed units, SSH and the network (and the app, if it was running before
+                     the update, keeps running), or restarts into the permanent slot
+  os-update fallback in emergency or rescue mode: on a trial boot, restarts into the permanent slot
+  os-update guard    from early in every boot (juggle-os-guard.service): on a trial boot, restarts into the permanent
+                     slot if the slot isn't kept within 15 minutes, however the boot went wrong
+
+The running slot is never written, and config.txt only changes on commit, so any failure, power cut or hang before
+then leaves the Pi starting the OS it had (a hang by way of the hardware watchdog, a kernel or initramfs failure by
+way of panic= on the kernel command line, and a boot that never gets to its check, or stops part way with systemd
+still feeding the watchdog, by way of guard).
+"""
+
+import hashlib
+import lzma
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+BOOT = Path("/boot/firmware")
+WORK = Path("/data/.os-update")
+TRYBOOT_FLAG = Path("/proc/device-tree/chosen/bootloader/tryboot")
+# What the check found on this boot, for status: checking, kept, or failed: <why>
+CHECK_STATE = Path("/run/juggle/os-check")
+# The last update, kept on the data partition (shell variables, which the login screens read with the slot helper):
+# UPDATE_WRITTEN (seconds since 1970, when write finished), UPDATE_SLOT, UPDATE_VERSION, UPDATE_APP (1 if the app
+# was running then, so the trial boot checks it too), UPDATE_TRIED (1 once tried) and UPDATE_RESULT (kept, or failed: why), which the trial boot's check sets, so the slot it goes back to can say why
+UPDATE_RECORD = Path("/data/.os-update-last")
+CHECK_SECONDS = 300
+# How long a trial boot has to be kept, from its start, before guard restarts it: the check's own 5 minutes start
+# only once the boot reaches multi-user, so with room for a slow one
+GUARD_SECONDS = 900
+# How long the app (if it was running before the update) must have kept running on a trial boot
+APP_SECONDS = 30
+# The root partition of each slot
+SLOTS = {"A": 2, "B": 3}
+CHUNK = 4 << 20
+ZEROS = memoryview(bytes(CHUNK))
+FIRMWARE = re.compile(r"(bootcode\.bin|start.*\.elf|fixup.*\.dat)", re.IGNORECASE)
+
+
+class UpdateError(Exception):
+    pass
+
+
+def say(message):
+    print(message, file=sys.stderr, flush=True)
+
+
+def running():
+    """The card's disk ID and the running slot, from root=PARTUUID=<disk ID>-<partition> on the kernel command line."""
+    found = re.search(r"\broot=PARTUUID=([0-9a-fA-F]{8})-([0-9]{2})\b", Path("/proc/cmdline").read_text())
+    if not found:
+        raise UpdateError("Not started from a Juggle card: no root=PARTUUID= on the kernel command line.")
+    partition = int(found.group(2))
+    slot = next((name for name, number in SLOTS.items() if number == partition), None)
+    if slot is None:
+        raise UpdateError(f"The root is partition {partition}, which isn't a slot.")
+    return found.group(1).lower(), slot
+
+
+def other(slot):
+    return "B" if slot == "A" else "A"
+
+
+def tried():
+    """Whether this boot is a tryboot: the firmware sets the flag for that one boot."""
+    return TRYBOOT_FLAG.exists() and int.from_bytes(TRYBOOT_FLAG.read_bytes()[:4], "big") == 1
+
+
+def prefix_slot(config):
+    """The slot a config.txt (or tryboot.txt) starts, from its os_prefix=slotX/ line, or None."""
+    if not config.exists():
+        return None
+    found = re.search(r"^os_prefix=slot([AB])/\s*$", config.read_text(), re.MULTILINE)
+    return found.group(1) if found else None
+
+
+def release_values(directory):
+    file = directory / "juggle-release.txt"
+    if not file.exists():
+        return {}
+    return dict(line.split("=", 1) for line in file.read_text().splitlines() if "=" in line)
+
+
+def release(directory):
+    """'<version> (build <stamp>)' from a directory's juggle-release.txt, or '' without one."""
+    values = release_values(directory)
+    return f"{values.get('VERSION', '?')} (build {values.get('BUILD_STAMP', '?')})" if values else ""
+
+
+def read_record():
+    if not UPDATE_RECORD.exists():
+        return {}
+    return dict(token.split("=", 1) for line in UPDATE_RECORD.read_text().splitlines()
+                for token in shlex.split(line) if "=" in token)
+
+
+def write_record(record):
+    UPDATE_RECORD.write_text("".join(f"{key}={shlex.quote(str(value))}\n" for key, value in record.items()))
+    os.sync()
+
+
+def update_record(slot, **values):
+    """Adds to the record of the last update, if it's about this slot."""
+    record = read_record()
+    if record.get("UPDATE_SLOT") == slot:
+        write_record(record | values)
+
+
+def status():
+    _, slot = running()
+    print(f"boot={Path('/proc/sys/kernel/random/boot_id').read_text().strip()}")
+    print(f"running={slot}")
+    print(f"tryboot={int(tried())}")
+    print(f"permanent={prefix_slot(BOOT / 'config.txt') or ''}")
+    print(f"waiting={prefix_slot(BOOT / 'tryboot.txt') or ''}")
+    print(f"check={CHECK_STATE.read_text().strip() if CHECK_STATE.exists() else ''}")
+    # "<slot> <kept|failed: why>" from the last trial boot: its check's verdict, or, if it restarted before its check,
+    # the next boot's note of that
+    record = read_record()
+    print(f"last={record['UPDATE_SLOT'] + ' ' + record['UPDATE_RESULT'] if 'UPDATE_RESULT' in record else ''}")
+    # What this os-update can do, for juggle: write takes a block map
+    print("features=map")
+    for name in SLOTS:
+        print(f"slot{name}={release(BOOT / f'slot{name}')}")
+
+
+def decompressed(source):
+    """The image, decompressed a chunk at a time (an .xz file's own checksums catch a damaged or cut-short image)."""
+    decompressor = lzma.LZMADecompressor(format=lzma.FORMAT_XZ)
+    while not decompressor.eof:
+        if decompressor.needs_input:
+            data = source.read(1 << 20)
+            if not data:
+                raise UpdateError("The image ended early: it's damaged, or the connection was lost.")
+        else:
+            data = b""
+        chunk = decompressor.decompress(data, max_length=CHUNK)
+        if chunk:
+            yield chunk
+    # Whatever follows (nothing, normally) is read, so the sender doesn't see the connection close early
+    while source.read(1 << 20):
+        pass
+
+
+class Reader:
+    """Reads a stream of chunks by exact lengths, in order."""
+
+    def __init__(self, chunks):
+        self.chunks = chunks
+        self.buffer = memoryview(b"")
+        self.position = 0
+
+    def read(self, length):
+        """The next length bytes, as chunks."""
+        while length > 0:
+            if not self.buffer:
+                self.buffer = memoryview(next(self.chunks, b""))
+                if not self.buffer:
+                    raise UpdateError("The image is shorter than its partition table says.")
+            part = self.buffer[:length]
+            self.buffer = self.buffer[len(part):]
+            self.position += len(part)
+            length -= len(part)
+            yield part
+
+    def skip_to(self, position):
+        if position < self.position:
+            raise UpdateError("The image's partitions aren't in order.")
+        for _ in self.read(position - self.position):
+            pass
+
+
+def partitions(mbr):
+    """(type, start byte, length in bytes) of an image's first two partitions: boot (FAT) and root (Linux)."""
+    if len(mbr) < 512 or mbr[510:512] != b"\x55\xaa":
+        raise UpdateError("This isn't a disk image: it has no partition table.")
+    found = []
+    for entry in range(2):
+        fields = mbr[446 + entry * 16:462 + entry * 16]
+        found.append((fields[4], int.from_bytes(fields[8:12], "little") * 512, int.from_bytes(fields[12:16], "little") * 512))
+    (boot_type, _, _), (root_type, _, _) = found
+    if boot_type not in (0x0B, 0x0C) or root_type != 0x83:
+        raise UpdateError("This isn't a Juggle OS image: its first partitions aren't boot (FAT) and root (Linux).")
+    return found[0][1:], found[1][1:]
+
+
+def size_of(device):
+    with open(device, "rb") as file:
+        return file.seek(0, os.SEEK_END)
+
+
+def drop_caches():
+    """Writes everything out and forgets the cached copy, so reading back reads the card."""
+    os.sync()
+    Path("/proc/sys/vm/drop_caches").write_text("3\n")
+
+
+def parse_map(text):
+    """The image's block map as sorted (start, end) byte ranges: "start-end,..." (end exclusive), from the .bmap that
+    juggle sends with the image."""
+    try:
+        ranges = sorted((int(start), int(end)) for start, end in (item.split("-") for item in text.split(",")))
+    except ValueError:
+        raise UpdateError(f"That isn't a block map: {text[:40]}") from None
+    if any(start >= end or start % 512 or end % 512 for start, end in ranges):
+        raise UpdateError("The block map's ranges aren't whole sectors.")
+    return ranges
+
+
+def within(ranges, start, end):
+    """The parts of [start, end) that the ranges cover."""
+    for range_start, range_end in ranges:
+        if range_end > start and range_start < end:
+            yield max(range_start, start), min(range_end, end)
+
+
+def unpack(source, boot_image, root_device, block_map=None):
+    """Writes the image's boot partition to a (sparse) file and its root partition to the slot's partition: only the
+    parts the block map lists, if there is one (the rest is the file system's free space, whose contents don't
+    matter). Returns the parts written, as (offset, length) in the partition, and their SHA-256."""
+    reader = Reader(decompressed(source))
+    mbr = b"".join(bytes(part) for part in reader.read(512))
+    (boot_start, boot_length), (root_start, root_length) = partitions(mbr)
+    if root_length > size_of(root_device):
+        raise UpdateError(f"The image's root ({root_length >> 20} MiB) is bigger than the slot's partition.")
+    root_map = None
+    if block_map is not None:
+        root_map = [(start - root_start, end - root_start)
+                    for start, end in within(block_map, root_start, root_start + root_length)]
+        if not root_map:
+            raise UpdateError("The block map lists nothing in the image's root: it's for another image.")
+    if root_map:
+        mapped = sum(end - start for start, end in root_map)
+        say(f"Unpacking the image as it arrives: the {mapped >> 20} MiB of its {root_length >> 20} MiB root partition "
+            f"that hold data go straight into the slot's partition (the rest is empty space)")
+    else:
+        say(f"Unpacking the image as it arrives: its {root_length >> 20} MiB root partition (empty space included) "
+            f"goes straight into the slot's partition")
+
+    reader.skip_to(boot_start)
+    with open(boot_image, "wb") as file:
+        for part in reader.read(boot_length):
+            # The partition is mostly empty space: left as holes in the file
+            for start in range(0, len(part), 64 << 10):
+                piece = part[start:start + (64 << 10)]
+                if piece == ZEROS[:len(piece)]:
+                    file.seek(len(piece), os.SEEK_CUR)
+                else:
+                    file.write(piece)
+        file.truncate(boot_length)
+
+    reader.skip_to(root_start)
+    digest = hashlib.sha256()
+    parts = []
+    position = 0
+    shown = 0
+    with open(root_device, "r+b", buffering=0) as device:
+        for part in reader.read(root_length):
+            pieces = within(root_map, position, position + len(part)) if root_map else [(position, position + len(part))]
+            for start, end in pieces:
+                data = part[start - position:end - position]
+                digest.update(data)
+                device.seek(start)
+                while data:
+                    data = data[device.write(data):]
+                # Next to the last part written: one longer part
+                if parts and parts[-1][0] + parts[-1][1] == start:
+                    parts[-1] = (parts[-1][0], parts[-1][1] + end - start)
+                else:
+                    parts.append((start, end - start))
+            position += len(part)
+            if position - shown >= 256 << 20:
+                shown = position
+                say(f"  {position >> 20} of {root_length >> 20} MiB done")
+        os.fsync(device.fileno())
+    # The rest of the stream, to its end, so its checksum is checked
+    for _ in reader.chunks:
+        pass
+    return parts, digest.hexdigest()
+
+
+def check_root(root_device, parts, expected):
+    """Reads back what was written, compares its checksum, and checks the file system."""
+    digest = hashlib.sha256()
+    with open(root_device, "rb", buffering=0) as device:
+        for start, length in parts:
+            device.seek(start)
+            while length > 0:
+                data = device.read(min(CHUNK, length))
+                if not data:
+                    raise UpdateError("The slot's partition is shorter than what was written to it.")
+                digest.update(data)
+                length -= len(data)
+    if digest.hexdigest() != expected:
+        raise UpdateError("The slot's partition doesn't read back as written: the card may be failing.")
+    fsck = subprocess.run(["e2fsck", "-fn", str(root_device)], capture_output=True, text=True)
+    if fsck.returncode != 0:
+        last = (fsck.stdout.strip().splitlines() or ["?"])[-1]
+        raise UpdateError(f"The new root's file system has errors (e2fsck: {last}).")
+
+
+def file_hash(path):
+    with open(path, "rb") as file:
+        return hashlib.file_digest(file, "sha256").hexdigest()
+
+
+def copy_slot(source, destination):
+    """Copies a slot's boot files (FAT can't keep owners or modes, so only the contents) and checks the copies."""
+    for directory, _, files in os.walk(source):
+        relative = Path(directory).relative_to(source)
+        (destination / relative).mkdir(parents=True, exist_ok=True)
+        for name in files:
+            shutil.copyfile(Path(directory) / name, destination / relative / name)
+    drop_caches()
+    for directory, _, files in os.walk(source):
+        relative = Path(directory).relative_to(source)
+        for name in files:
+            if file_hash(Path(directory) / name) != file_hash(destination / relative / name):
+                raise UpdateError(f"{relative / name} doesn't read back as written on the boot partition.")
+
+
+def replace_file(path, text):
+    """Writes a file on the boot partition as nearly all at once as FAT allows: a new file, then a rename."""
+    new = path.with_name(path.name + ".new")
+    new.write_text(text)
+    os.sync()
+    os.replace(new, path)
+    os.sync()
+
+
+def write(block_map=None):
+    disk, slot = running()
+    if prefix_slot(BOOT / "config.txt") != slot:
+        raise UpdateError(f"Slot {slot} is running on trial: run 'os-update commit' to keep it (or restart to go "
+                          f"back to slot {other(slot)}) before updating again.")
+    target = other(slot)
+    root_device = Path(f"/dev/disk/by-partuuid/{disk}-{SLOTS[target]:02d}")
+    if not root_device.exists():
+        raise UpdateError(f"Slot {target}'s root partition ({root_device}) isn't on the card.")
+    real = os.path.realpath(root_device)
+    if any(os.path.realpath(line.split()[0]) == real for line in Path("/proc/mounts").read_text().splitlines()):
+        raise UpdateError(f"Slot {target}'s root partition is mounted: not writing it.")
+
+    # Nothing may try the slot while it's being written, and the last trial's verdict is about another image
+    (BOOT / "tryboot.txt").unlink(missing_ok=True)
+    UPDATE_RECORD.unlink(missing_ok=True)
+    shutil.rmtree(WORK, ignore_errors=True)
+    WORK.mkdir(mode=0o700)
+    mounted = WORK / "image"
+    try:
+        say(f"Writing the new OS into slot {target} (slot {slot} is running)")
+        parts, root_hash = unpack(sys.stdin.buffer, WORK / "boot.img", root_device, block_map)
+        say("Checking the root partition")
+        drop_caches()
+        check_root(root_device, parts, root_hash)
+
+        mounted.mkdir()
+        subprocess.run(["mount", "-o", "loop,ro", str(WORK / "boot.img"), str(mounted)], check=True)
+        if not (mounted / "slotA").is_dir() or prefix_slot(mounted / "config.txt") != "A":
+            raise UpdateError("This image is from before A/B updates: it can only be flashed.")
+
+        say(f"Copying the boot files into slot{target}/")
+        slot_dir = BOOT / f"slot{target}"
+        new_dir = BOOT / f"slot{target}.new"
+        shutil.rmtree(slot_dir, ignore_errors=True)
+        shutil.rmtree(new_dir, ignore_errors=True)
+        copy_slot(mounted / "slotA", new_dir)
+        cmdline = (new_dir / "cmdline.txt").read_text()
+        cmdline, count = re.subn(r"\broot=PARTUUID=\S+", f"root=PARTUUID={disk}-{SLOTS[target]:02d}", cmdline)
+        if count != 1:
+            raise UpdateError("The image's cmdline.txt doesn't name its root.")
+        replace_file(new_dir / "cmdline.txt", cmdline)
+        shutil.copyfile(mounted / "juggle-release.txt", new_dir / "juggle-release.txt")
+        os.sync()
+        os.rename(new_dir, slot_dir)
+
+        firmware = [path.name for path in mounted.iterdir() if FIRMWARE.fullmatch(path.name)]
+        if any(not (BOOT / name).exists() or file_hash(mounted / name) != file_hash(BOOT / name) for name in firmware):
+            say("The new image has different firmware: OS updates keep this card's (only flashing changes it).")
+
+        # The new image's config.txt, starting the new slot, for one boot
+        config, count = re.subn(r"^os_prefix=slotA/\s*$", f"os_prefix=slot{target}/", (mounted / "config.txt").read_text(),
+                                flags=re.MULTILINE)
+        replace_file(BOOT / "tryboot.txt", config)
+        write_record({"UPDATE_WRITTEN": int(time.time()), "UPDATE_SLOT": target,
+                      "UPDATE_VERSION": release_values(slot_dir).get("VERSION", "?"),
+                      "UPDATE_APP": int(app_state()["SubState"] == "running")})
+        say(f"Slot {target} is ready to try: {release(slot_dir)}")
+    finally:
+        if os.path.ismount(mounted):
+            subprocess.run(["umount", str(mounted)], check=False)
+        shutil.rmtree(WORK, ignore_errors=True)
+
+
+def try_slot():
+    _, slot = running()
+    waiting = prefix_slot(BOOT / "tryboot.txt")
+    if waiting is None or waiting == slot:
+        raise UpdateError("No update is waiting to be tried: run 'os-update write' first.")
+    say(f"Restarting into slot {waiting} for one boot")
+    update_record(waiting, UPDATE_TRIED=1)
+    subprocess.run(["systemctl", "--no-block", "--reboot-argument=0 tryboot", "reboot"], check=True)
+
+
+def commit():
+    _, slot = running()
+    if prefix_slot(BOOT / "config.txt") == slot:
+        say(f"Slot {slot} is already permanent.")
+        return
+    if not tried() or prefix_slot(BOOT / "tryboot.txt") != slot:
+        raise UpdateError(f"Slot {slot} wasn't started by tryboot: not making it permanent.")
+    replace_file(BOOT / "config.txt", (BOOT / "tryboot.txt").read_text())
+    shutil.copyfile(BOOT / f"slot{slot}" / "juggle-release.txt", BOOT / "juggle-release.txt")
+    (BOOT / "tryboot.txt").unlink()
+    os.sync()
+    update_record(slot, UPDATE_RESULT="kept")
+    # The console said the slot was on trial: it says so no longer
+    subprocess.run(["/usr/lib/juggle/slot", "issue"], check=False)
+    subprocess.run(["agetty", "--reload"], check=False)
+    say(f"Slot {slot} is now permanent: {release(BOOT / f'slot{slot}')}")
+
+
+def systemctl(*args):
+    return subprocess.run(["systemctl", *args], capture_output=True, text=True)
+
+
+def health():
+    """None if this boot is healthy within CHECK_SECONDS: started with no failed units, SSH running and a routable
+    network (updates come over it). Otherwise why not, as a sentence for the login screens and juggle."""
+    deadline = time.monotonic() + CHECK_SECONDS
+    minutes = CHECK_SECONDS // 60
+    while (state := systemctl("is-system-running").stdout.strip()) in ("initializing", "starting"):
+        if time.monotonic() > deadline:
+            return f"It didn't finish starting within {minutes} minutes"
+        time.sleep(5)
+    if state != "running":
+        failed = [line.split()[0] for line in systemctl("--failed", "--no-legend", "--plain").stdout.splitlines() if line]
+        if len(failed) == 1:
+            return f"A service failed to start: {failed[0]}"
+        return f"{len(failed)} services failed to start: {', '.join(failed)}" if failed else f"The system is {state}"
+    if systemctl("is-active", "--quiet", "ssh.service").returncode != 0:
+        return "SSH didn't start"
+    remaining = max(10, int(deadline - time.monotonic()))
+    online = subprocess.run(["/usr/lib/systemd/systemd-networkd-wait-online", "--any", f"--timeout={remaining}"],
+                            capture_output=True)
+    if online.returncode != 0:
+        return f"No network within {minutes} minutes"
+    # The app, if it was running before the update: it must keep running for a while on the new OS
+    if read_record().get("UPDATE_APP") == "1":
+        while True:
+            app = app_state()
+            if app["SubState"] in ("failed", "dead") or app["NRestarts"] != "0":
+                return "The app kept stopping (journalctl -u juggle-app says why)"
+            if app["SubState"] == "running" and \
+                    time.monotonic() - int(app["ActiveEnterTimestampMonotonic"]) / 1e6 >= APP_SECONDS:
+                break
+            if time.monotonic() > deadline:
+                return f"The app didn't start within {minutes} minutes"
+            time.sleep(2)
+    return None
+
+
+def app_state():
+    """juggle-app.service's SubState (running, auto-restart, failed...), NRestarts and ActiveEnterTimestampMonotonic."""
+    keys = ("SubState", "NRestarts", "ActiveEnterTimestampMonotonic")
+    shown = systemctl("show", *(f"--property={key}" for key in keys), "juggle-app.service").stdout
+    return dict(line.split("=", 1) for line in shown.splitlines() if "=" in line)
+
+
+def check():
+    _, slot = running()
+    if not tried():
+        # Back from a trial boot that never got as far as its check: it crashed (panic=10), hung (the watchdog) or
+        # lost power, and this boot is the firmware's way back. Say so, as a check that failed would.
+        record = read_record()
+        if record.get("UPDATE_TRIED") == "1" and "UPDATE_RESULT" not in record and record.get("UPDATE_SLOT") != slot:
+            update_record(record["UPDATE_SLOT"], UPDATE_RESULT="failed: It restarted before it could check itself "
+                                                              "(a crash, a hang, a boot that didn't finish, or a "
+                                                              "power cut)")
+        return
+
+    def note(text):
+        CHECK_STATE.parent.mkdir(parents=True, exist_ok=True)
+        CHECK_STATE.write_text(text + "\n")
+
+    if prefix_slot(BOOT / "tryboot.txt") != slot or prefix_slot(BOOT / "config.txt") == slot:
+        note("")  # a tryboot that isn't an update's trial: nothing to check, and nothing for guard to wait for
+        return
+
+    note("checking")
+    say(f"Slot {slot} is on trial: checking it")
+    problem = health()
+    if problem is None:
+        commit()
+        note("kept")
+    else:
+        permanent = prefix_slot(BOOT / "config.txt")
+        note(f"failed: {problem}")
+        update_record(slot, UPDATE_RESULT=f"failed: {problem}")
+        say(f"Slot {slot} isn't healthy ({problem}): restarting into slot {permanent}")
+        subprocess.run(["systemctl", "--no-block", "reboot"], check=True)
+
+
+def fallback():
+    """Emergency or rescue mode on a trial boot: back to the permanent slot. (The boot partition may not be mounted
+    here, so the firmware's flag decides: a restart after any tryboot starts config.txt's slot.)"""
+    if tried():
+        say("The trial boot failed: restarting into the permanent slot")
+        subprocess.run(["systemctl", "--no-block", "reboot"], check=True)
+
+
+def guard():
+    """On a trial boot, restarts into the permanent slot if the slot isn't kept within GUARD_SECONDS: for a boot
+    that never gets as far as its check (a service ahead of it that never finishes), or stops part way (the card no
+    longer answering, say) while systemd still feeds the hardware watchdog. It reads only /proc and /run (in memory),
+    and restarts by the kernel's SysRq, so it needs nothing else to work. (juggle-os-guard.service runs it at a
+    real-time priority, so busy tasks can't hold it up.)"""
+    if not tried():
+        return
+    deadline = time.monotonic() + GUARD_SECONDS
+    while time.monotonic() < deadline:
+        # Until the check has started and while it runs. Once it has decided, it commits the slot or restarts the Pi
+        # itself (a restart that hangs is the watchdog's, RebootWatchdogSec)
+        if CHECK_STATE.exists() and CHECK_STATE.read_text().strip() != "checking":
+            return
+        time.sleep(2)
+    say(f"The trial boot wasn't kept within {GUARD_SECONDS // 60} minutes: restarting into the permanent slot")
+    with open("/proc/sysrq-trigger", "w") as sysrq:
+        sysrq.write("s")  # what can still be written, is
+    time.sleep(3)
+    with open("/proc/sysrq-trigger", "w") as sysrq:
+        sysrq.write("b")
+
+
+def main():
+    commands = {"status": status, "write": write, "try": try_slot, "commit": commit, "check": check,
+                "fallback": fallback, "guard": guard}
+    args = sys.argv[1:]
+    map_arg = next((arg for arg in args[1:] if arg.startswith("--map=")), None)
+    if not args or args[0] not in commands or len(args) > (2 if args[0] == "write" and map_arg else 1):
+        print(__doc__, file=sys.stderr)
+        return 2
+    if os.geteuid() != 0:
+        print("os-update runs as root: sudo os-update ...", file=sys.stderr)
+        return 1
+    try:
+        if map_arg:
+            write(parse_map(map_arg[len("--map="):]))
+        else:
+            commands[args[0]]()
+    except UpdateError as error:
+        say(str(error))
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

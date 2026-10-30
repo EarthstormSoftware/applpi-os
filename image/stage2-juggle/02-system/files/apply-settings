@@ -1,0 +1,356 @@
+#!/usr/bin/python3
+"""Applies this Pi's settings at boot, before the network starts.
+
+The flash tool writes them to juggle.json on the boot partition. When that file is there, it is checked, moved to the
+data partition and deleted, so the Wi-Fi password doesn't stay on the FAT partition (only the key made from it is
+kept). The SSH host key can come with them (juggle keeps one per Pi, so a reflashed Pi keeps its identity); otherwise
+one is made. Then, at every boot, the hostname, time zone, Wi-Fi and SSH keys are set from the copy on the data
+partition, with the time server if the app set one (app-request).
+The root filesystem is read-only with changes in RAM, so all of this is made again at each boot.
+
+Without settings, the Pi starts in setup mode (/usr/lib/juggle/setup): Wi-Fi runs the Juggle-SETUP hotspot instead,
+for the setup page. The Wi-Fi check (wifi-check) asks for setup mode at the next boot when Wi-Fi didn't connect, and
+the app can ask for it (app-request setup, to rename the Pi or change its Wi-Fi or keys); then the Pi's other settings
+(its name, SSH keys) still apply.
+"""
+
+import hashlib
+import json
+import os
+import re
+import socket
+import subprocess
+import sys
+from pathlib import Path
+
+BOOT_SETTINGS = Path("/boot/firmware/juggle.json")
+BOOT_ERROR = Path("/boot/firmware/juggle-error.txt")
+SETTINGS = Path("/data/settings/device.json")
+HOST_KEY = Path("/data/ssh/ssh_host_ed25519_key")
+RUN_DIR = Path("/run/juggle")
+ZONEINFO = Path("/usr/share/zoneinfo")
+USER = "juggle"
+# Setup mode: this boot (holding why: one of SETUP_REASONS), and asked for the next boot (holding who asked: the app
+# writes "asked", the Wi-Fi check nothing)
+SETUP = RUN_DIR / "setup"
+SETUP_NEXT = Path("/data/settings/setup-next")
+SETUP_REASONS = ("no-settings", "wifi", "asked")
+SETUP_SSID = "Juggle-SETUP"
+SETUP_ADDRESS = "192.168.4.1"
+# Sorts before 20-wireless.network, so it's the one networkd uses for wlan0
+SETUP_NETWORK = Path("/run/systemd/network/05-setup.network")
+SERIAL = Path("/proc/device-tree/serial-number")
+# The Wi-Fi fallback (wifi-check): with no network after_minutes after starting, setup mode for for_minutes. Set in
+# the settings (juggle.json, the setup page, or the app by app-request); these are the defaults, and the limits. Up to
+# a day before, as a router can be slow back after a power cut.
+WIFI_FALLBACK = {"enabled": True, "after_minutes": 360, "for_minutes": 10}
+WIFI_FALLBACK_LIMITS = {"after_minutes": (1, 1440), "for_minutes": (5, 120)}
+WIFI_CHECK = RUN_DIR / "wifi-check"
+# Wi-Fi settings the Pi has connected with (a hash of the network and its password, written by wifi-check). Others are
+# new, perhaps mistyped, so the fallback comes after TRIAL_MINUTES rather than after_minutes, and even when it's off.
+WIFI_PROVEN = Path("/data/settings/wifi-proven")
+TRIAL_MINUTES = 5
+# A network the app changed to (app-request wifi), on trial: if it doesn't connect within TRIAL_MINUTES, wifi-check
+# puts the one before back (give_up_wifi()) rather than starting setup mode. Both go once it has connected.
+WIFI_TRIAL = Path("/data/settings/wifi-trial")
+WIFI_PREVIOUS = Path("/data/settings/wifi-previous.json")
+
+HOSTNAME = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")
+COUNTRY = re.compile(r"[A-Z]{2}")
+# A time server: a host name or an IPv4 or IPv6 address (the app can change it: app-request ntp)
+SERVER = re.compile(r"[A-Za-z0-9]([A-Za-z0-9.:-]{0,251}[A-Za-z0-9])?")
+NTP_CONF = Path("/run/systemd/timesyncd.conf.d/juggle.conf")
+SSH_KEY = re.compile(
+    r"(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com"
+    r"|sk-ecdsa-sha2-nistp256@openssh\.com) [A-Za-z0-9+/]+=*( [^\r\n]*)?"
+)
+HOST_KEY_PATTERN = re.compile(
+    r"-----BEGIN OPENSSH PRIVATE KEY-----\n[A-Za-z0-9+/=\n]+-----END OPENSSH PRIVATE KEY-----\n?"
+)
+
+
+class SettingsError(Exception):
+    pass
+
+
+def check(raw: object) -> dict:
+    """Checks the settings from juggle.json and returns them as kept on the data partition."""
+    if not isinstance(raw, dict):
+        raise SettingsError("the file must hold a JSON object")
+
+    hostname = raw.get("hostname")
+    if not isinstance(hostname, str) or not HOSTNAME.fullmatch(hostname):
+        raise SettingsError("hostname must be 1-63 lower-case letters, digits and hyphens, not starting or ending "
+                            "with a hyphen")
+    settings: dict = {"hostname": hostname}
+
+    timezone = raw.get("timezone")
+    if timezone is not None:
+        if (not isinstance(timezone, str) or not timezone or timezone.startswith("/") or ".." in timezone
+                or not (ZONEINFO / timezone).is_file()):
+            raise SettingsError(f"unknown time zone: {timezone}")
+        settings["timezone"] = timezone
+
+    ntp = raw.get("ntp")
+    if ntp:
+        if not isinstance(ntp, str) or not SERVER.fullmatch(ntp):
+            raise SettingsError(f"ntp must be a time server's name or address: {ntp}")
+        settings["ntp"] = ntp
+
+    wifi = raw.get("wifi")
+    if wifi is not None:
+        settings["wifi"] = check_wifi(wifi)
+
+    fallback = raw.get("wifi_fallback")
+    if fallback is not None:
+        settings["wifi_fallback"] = check_wifi_fallback(fallback)
+
+    keys = raw.get("ssh_keys")
+    if (not isinstance(keys, list) or not keys
+            or not all(isinstance(key, str) and SSH_KEY.fullmatch(key.strip()) for key in keys)):
+        raise SettingsError("ssh_keys must be a list of one or more SSH public keys")
+    settings["ssh_keys"] = [key.strip() for key in keys]
+
+    # Taken out by import_boot_settings: it goes in /data/ssh, not in device.json
+    host_key = raw.get("host_key")
+    if host_key is not None:
+        host_key = host_key.replace("\r\n", "\n").strip() + "\n" if isinstance(host_key, str) else None
+        if host_key is None or not HOST_KEY_PATTERN.fullmatch(host_key):
+            raise SettingsError("host_key must be an OpenSSH private key")
+        settings["host_key"] = host_key
+
+    return settings
+
+
+def check_wifi(wifi: object) -> dict:
+    """{"country", "ssid", "password"} checked, as kept: {"country", "ssid", "psk"}. Raises SettingsError."""
+    if not isinstance(wifi, dict):
+        raise SettingsError("wifi must be an object with country, ssid and password")
+    country, ssid, password = wifi.get("country"), wifi.get("ssid"), wifi.get("password")
+    if not isinstance(country, str) or not COUNTRY.fullmatch(country):
+        raise SettingsError("wifi.country must be a two-letter country code, such as GB")
+    if not isinstance(ssid, str) or not 1 <= len(ssid.encode()) <= 32:
+        raise SettingsError("wifi.ssid must be 1-32 bytes")
+    if (not isinstance(password, str) or not 8 <= len(password) <= 63 or not password.isascii()
+            or not password.isprintable()):
+        raise SettingsError("wifi.password must be 8-63 printable ASCII characters")
+    psk = hashlib.pbkdf2_hmac("sha1", password.encode(), ssid.encode(), 4096, 32).hex()
+    return {"country": country, "ssid": ssid, "psk": psk}
+
+
+def scan_wifi(exclude: str = "") -> list:
+    """The Wi-Fi networks in range, strongest first. Raises OSError if the dongle can't scan."""
+    networks = {}
+    for args in (["scan"], ["scan", "ap-force"]):
+        result = subprocess.run(["iw", "dev", "wlan0", *args], capture_output=True, text=True)
+        if result.returncode == 0:
+            break
+    else:
+        raise OSError(result.stderr.strip() or "iw failed")
+    signal = None
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if line.startswith("signal:"):
+            signal = float(line.split()[1])
+        elif line.startswith("SSID: "):
+            # iw writes bytes outside printable ASCII as \xNN
+            name = re.sub(rb"\\x([0-9a-f]{2})", lambda m: bytes([int(m.group(1), 16)]),
+                          line[6:].encode("latin-1", "replace")).decode("utf-8", "replace")
+            level = signal if signal is not None else -100
+            if name and name != exclude and (name not in networks or level > networks[name]):
+                networks[name] = level
+    return sorted(networks, key=networks.get, reverse=True)
+
+
+def give_up_wifi() -> bool:
+    """The network the app changed to didn't connect: the one before goes back into the settings. True if there was
+    one to put back."""
+    if not WIFI_TRIAL.exists():
+        return False
+    try:
+        before = json.loads(WIFI_PREVIOUS.read_text(encoding="utf-8"))
+        settings = json.loads(SETTINGS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        WIFI_TRIAL.unlink(missing_ok=True)
+        return False
+    if before:
+        settings["wifi"] = before
+    else:
+        settings.pop("wifi", None)
+    write(SETTINGS, json.dumps(settings, indent=2) + "\n", 0o600)
+    WIFI_PREVIOUS.unlink(missing_ok=True)
+    WIFI_TRIAL.unlink(missing_ok=True)
+    os.sync()
+    return True
+
+
+def check_wifi_fallback(raw: object) -> dict:
+    """The Wi-Fi fallback's settings, with the defaults for any left out (the setup page and app-request use this)."""
+    if not isinstance(raw, dict):
+        raise SettingsError("wifi_fallback must be an object with enabled, after_minutes and for_minutes")
+    fallback = WIFI_FALLBACK | raw
+    if set(fallback) != set(WIFI_FALLBACK) or not isinstance(fallback["enabled"], bool):
+        raise SettingsError("wifi_fallback must be an object with enabled, after_minutes and for_minutes")
+    for key, (lowest, highest) in WIFI_FALLBACK_LIMITS.items():
+        if type(fallback[key]) is not int or not lowest <= fallback[key] <= highest:
+            raise SettingsError(f"wifi_fallback.{key} must be {lowest}-{highest} minutes")
+    return fallback
+
+
+def wifi_fingerprint(wifi: dict) -> str:
+    """Which Wi-Fi settings these are, without keeping them: a hash of the network and its password."""
+    return hashlib.sha256(f"{wifi['ssid']}\n{wifi['psk']}".encode()).hexdigest()
+
+
+def wifi_fallback(settings: dict) -> dict:
+    """The Wi-Fi fallback as set, or the defaults."""
+    return WIFI_FALLBACK | settings.get("wifi_fallback", {})
+
+
+def write(path: Path, text: str, mode: int) -> None:
+    """Writes a file so that a power cut leaves either the old one or the new one."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_name(path.name + ".tmp")
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+    os.fchmod(fd, mode)
+    with os.fdopen(fd, "w", encoding="utf-8") as file:
+        file.write(text)
+        file.flush()
+        os.fsync(file.fileno())
+    os.replace(temp, path)
+
+
+def import_boot_settings() -> None:
+    """Moves juggle.json from the boot partition to the data partition, if it is there."""
+    if not BOOT_SETTINGS.exists():
+        return
+    try:
+        settings = check(json.loads(BOOT_SETTINGS.read_text(encoding="utf-8-sig")))
+    except (ValueError, SettingsError) as error:
+        # The file holds the Wi-Fi password, so it goes either way. The reason is left where Windows can see it.
+        BOOT_SETTINGS.unlink()
+        BOOT_ERROR.write_text(f"juggle.json was not used: {error}\n", encoding="utf-8")
+        os.sync()
+        print(f"juggle.json was not used: {error}", file=sys.stderr)
+        return
+    host_key = settings.pop("host_key", None)
+    if host_key:
+        write(HOST_KEY, host_key, 0o600)
+        public_key = subprocess.run(["ssh-keygen", "-y", "-f", str(HOST_KEY)], check=True, capture_output=True,
+                                    text=True).stdout
+        write(HOST_KEY.with_name(HOST_KEY.name + ".pub"), public_key, 0o644)
+    write(SETTINGS, json.dumps(settings, indent=2) + "\n", 0o600)
+    BOOT_SETTINGS.unlink()
+    BOOT_ERROR.unlink(missing_ok=True)
+    os.sync()
+    print(f"Settings for {settings['hostname']} moved from juggle.json to the data partition")
+
+
+def apply(settings: dict) -> None:
+    """Sets the hostname, time zone, Wi-Fi and SSH keys for this boot."""
+    socket.sethostname(settings["hostname"])
+
+    timezone = settings.get("timezone")
+    if timezone:
+        link = Path("/etc/localtime.juggle")
+        link.unlink(missing_ok=True)
+        link.symlink_to(ZONEINFO / timezone)
+        os.replace(link, "/etc/localtime")
+
+    # Before timesyncd starts (this runs before sysinit.target)
+    ntp = settings.get("ntp")
+    if ntp and SERVER.fullmatch(ntp):
+        write(NTP_CONF, f"[Time]\nNTP={ntp}\n", 0o644)
+
+    RUN_DIR.mkdir(mode=0o755, exist_ok=True)
+    write(RUN_DIR / "authorized_keys" / USER, "\n".join(settings["ssh_keys"]) + "\n", 0o644)
+
+    wifi = settings.get("wifi")
+    fallback = wifi_fallback(settings)
+    if wifi and not SETUP.exists():
+        proven = wifi_fingerprint(wifi)
+        try:
+            known = WIFI_PROVEN.read_text(encoding="utf-8").strip() == proven
+        except OSError:
+            known = False
+        if not known or fallback["enabled"]:
+            # For wifi-check (juggle-wifi-check.service runs only with this)
+            minutes = fallback["after_minutes"] if known else min(TRIAL_MINUTES, fallback["after_minutes"])
+            write(WIFI_CHECK, f"WAIT_SECONDS={minutes * 60}\nPROVEN={proven}\n", 0o644)
+    if wifi and not SETUP.exists():
+        write(RUN_DIR / "wpa_supplicant-wlan0.conf",
+              f"country={wifi['country']}\n"
+              "ctrl_interface=/run/wpa_supplicant\n"
+              "network={\n"
+              f"\tssid={wifi['ssid'].encode().hex()}\n"
+              f"\tpsk={wifi['psk']}\n"
+              "}\n",
+              0o600)
+
+
+def default_hostname() -> str:
+    """juggle-<the last 4 digits of the Pi's serial number>, for setup mode on a Pi with no name yet."""
+    serial = SERIAL.read_bytes().strip(b"\0").decode(errors="replace").lower() if SERIAL.exists() else ""
+    serial = re.sub(r"[^0-9a-f]", "", serial)
+    return f"juggle-{serial[-4:]}" if serial else "juggle"
+
+
+def start_setup_mode(reason: str, country: str | None) -> None:
+    """Wi-Fi runs the open Juggle-SETUP hotspot, with a DHCP server, for the setup page (juggle-setup.service)."""
+    write(SETUP, reason + "\n", 0o644)
+    write(RUN_DIR / "wpa_supplicant-wlan0.conf",
+          (f"country={country}\n" if country else "") +
+          "ctrl_interface=/run/wpa_supplicant\n"
+          "network={\n"
+          f"\tssid=\"{SETUP_SSID}\"\n"
+          "\tmode=2\n"
+          "\tfrequency=2412\n"
+          "\tkey_mgmt=NONE\n"
+          "}\n",
+          0o600)
+    write(SETUP_NETWORK,
+          "[Match]\n"
+          "Name=wlan0\n"
+          "\n"
+          "[Network]\n"
+          f"Address={SETUP_ADDRESS}/24\n"
+          "DHCPServer=yes\n"
+          "ConfigureWithoutCarrier=yes\n"
+          "LLMNR=no\n"
+          "MulticastDNS=no\n"
+          "\n"
+          "[DHCPServer]\n"
+          "PoolOffset=10\n"
+          "PoolSize=40\n"
+          f"DNS={SETUP_ADDRESS}\n",
+          0o644)
+    print(f"Setup mode ({reason}): join {SETUP_SSID} for the setup page", file=sys.stderr)
+
+
+def main() -> int:
+    import_boot_settings()
+
+    # The host key stays with the Pi, on the data partition, so it keeps the same identity across OS updates. If
+    # juggle didn't send one, the Pi makes its own.
+    if not HOST_KEY.exists():
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "", "-f", str(HOST_KEY)], check=True)
+
+    if not SETTINGS.exists():
+        socket.sethostname(default_hostname())
+        start_setup_mode("no-settings", None)
+        return 0
+    settings = json.loads(SETTINGS.read_text(encoding="utf-8"))
+    if SETUP_NEXT.exists():
+        # Once: the next boot tries Wi-Fi again, unless the Wi-Fi check asks again
+        reason = "asked" if SETUP_NEXT.read_text(errors="replace").strip() == "asked" else "wifi"
+        SETUP_NEXT.unlink()
+        os.sync()
+        start_setup_mode(reason, (settings.get("wifi") or {}).get("country"))
+    apply(settings)
+    return 0
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] == ["--wifi-give-up"]:  # from wifi-check
+        sys.exit(0 if give_up_wifi() else 1)
+    sys.exit(main())

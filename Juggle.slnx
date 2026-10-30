@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Juggle.Cli/Juggle.Cli.csproj" />
+    <Project Path="src/Juggle.Core/Juggle.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Juggle.Core.Tests/Juggle.Core.Tests.csproj" />
+  </Folder>
+</Solution>

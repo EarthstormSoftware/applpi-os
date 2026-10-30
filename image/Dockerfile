@@ -1,4 +1,4 @@
-# The ApplPi OS build: pi-gen at a fixed release, with its stages 0 and 1 (a bare bootable system) and our own stage
+# The Juggle OS build: pi-gen at a fixed release, with its stages 0 and 1 (a bare bootable system) and our own stage
 # in place of stage 2 (the Lite image). Built for linux/386, as pi-gen's own build-docker.sh does on 64-bit hosts.
 FROM i386/debian:trixie
 
@@ -12,7 +12,7 @@ RUN apt-get -y update && \
         git parted quilt coreutils qemu-user debootstrap zerofree zip dosfstools e2fsprogs \
         libarchive-tools libcap2-bin rsync grep udev xz-utils curl xxd file kmod bc \
         ca-certificates fdisk gpg pigz arch-test \
-    # to render the logos, and for pi-gen to list the image's used blocks (.bmap, so applpi flash skips the rest)
+    # to render the logos, and for pi-gen to list the image's used blocks (.bmap, so juggle flash skips the rest)
         librsvg2-bin fonts-dejavu-core imagemagick bmap-tools \
     && rm -rf /var/lib/apt/lists/*
 
@@ -22,8 +22,8 @@ RUN git clone --depth 1 --branch "${PIGEN_REF}" https://github.com/RPi-Distro/pi
     && rm -rf /pi-gen/export-image/01-user-rename
 
 COPY config build-in-container.sh export-slots.sh /pi-gen/
-COPY stage2-applpi /pi-gen/stage2-applpi
-RUN chmod +x /pi-gen/build-in-container.sh && find /pi-gen/stage2-applpi -name '*.sh' -exec chmod +x {} +
+COPY stage2-juggle /pi-gen/stage2-juggle
+RUN chmod +x /pi-gen/build-in-container.sh && find /pi-gen/stage2-juggle -name '*.sh' -exec chmod +x {} +
 
 VOLUME [ "/pi-gen/work" ]
 WORKDIR /pi-gen

@@ -5,18 +5,18 @@
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
-  <Target Name="ApplPiVersion" BeforeTargets="GetAssemblyVersion;GenerateAssemblyInfo">
+  <Target Name="JuggleVersion" BeforeTargets="GetAssemblyVersion;GenerateAssemblyInfo">
     <Exec Command="git describe --tags --match &quot;v[0-9]*&quot; --always --dirty" ConsoleToMSBuild="true"
           StandardOutputImportance="low" IgnoreExitCode="true" WorkingDirectory="$(MSBuildThisFileDirectory)">
-      <Output TaskParameter="ConsoleOutput" PropertyName="ApplPiGitVersion" />
-      <Output TaskParameter="ExitCode" PropertyName="ApplPiGitExitCode" />
+      <Output TaskParameter="ConsoleOutput" PropertyName="JuggleGitVersion" />
+      <Output TaskParameter="ExitCode" PropertyName="JuggleGitExitCode" />
     </Exec>
-    <PropertyGroup Condition="'$(ApplPiGitExitCode)' == '0'">
-      <InformationalVersion>$(ApplPiGitVersion)</InformationalVersion>
+    <PropertyGroup Condition="'$(JuggleGitExitCode)' == '0'">
+      <InformationalVersion>$(JuggleGitVersion)</InformationalVersion>
       <!-- The numeric part for the file version: v0.1.0-3-g1ad84dc gives 0.1.0 -->
-      <ApplPiNumericVersion>$([System.Text.RegularExpressions.Regex]::Match($(ApplPiGitVersion), '^v(\d+\.\d+\.\d+)').Groups[1].Value)</ApplPiNumericVersion>
-      <Version Condition="'$(ApplPiNumericVersion)' != ''">$(ApplPiNumericVersion)</Version>
-      <FileVersion Condition="'$(ApplPiNumericVersion)' != ''">$(ApplPiNumericVersion).0</FileVersion>
+      <JuggleNumericVersion>$([System.Text.RegularExpressions.Regex]::Match($(JuggleGitVersion), '^v(\d+\.\d+\.\d+)').Groups[1].Value)</JuggleNumericVersion>
+      <Version Condition="'$(JuggleNumericVersion)' != ''">$(JuggleNumericVersion)</Version>
+      <FileVersion Condition="'$(JuggleNumericVersion)' != ''">$(JuggleNumericVersion).0</FileVersion>
     </PropertyGroup>
   </Target>
 

@@ -1,0 +1,318 @@
+#!/usr/bin/python3
+"""The app: one per Pi, like a Pico's firmware. It lives in /data/app and starts at main.py, with its pure-Python
+libraries in lib/, and keeps what it writes (settings and so on) in /data/app-state. Its manifest, app.json:
+
+  {"juggle": "1.0", "name": "hello", "version": "1.0.0", "root": false, "pwm": false}
+
+juggle: the Juggle OS version the app needs, "MAJOR.MINOR" (docs/app-contract.md): refused if this OS's major differs
+or its minor is lower, and the app is given this OS's as JUGGLE; name: lowercase letters, digits and hyphens;
+version: what the login screens show; root (optional): run as root, for
+libraries that need it (rpi_ws281x). Otherwise it runs as the app user, with the hardware groups (GPIO, I2C, SPI,
+video, input, serial) and the right to use ports below 1024 (its web page is on port 80). pwm (optional): it uses
+the PWM hardware (WS2812 LEDs on GPIO 18, by rpi_ws281x), which the onboard audio also uses, so the audio driver is
+unloaded while it runs; for any other app (or none) it's loaded.
+
+  app run              juggle-app.service: runs the app (the service restarts it if it stops)
+  app install <file>   installs an app from a .tar of its folder (its deploy.ps1 copies one here), replacing the one
+                       there, then starts it and says whether it's running. A different app (another name) starts
+                       with empty state.
+  app trial <file>     installs a new version of the app there (the same name), keeping the old one until the new
+                       one has kept running for 30 s, and otherwise putting the old one back. The app asks for this
+                       itself (app-request update); /data/app-state/update-result.json says how it went.
+  app remove          stops the app and removes it and its state
+"""
+
+import json
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tarfile
+import time
+from pathlib import Path
+
+APP = Path("/data/app")
+STATE = Path("/data/app-state")
+# The app as last started, for the login screens: APP_NAME and APP_VERSION, or APP_ERROR (shell variables)
+INFO = Path("/run/juggle/app")
+SERVICE = "juggle-app.service"
+USER = "app"
+KEYS = {"juggle", "name", "version", "root", "pwm"}
+# The Juggle OS version this OS gives apps (docs/app-contract.md): the MAJOR.MINOR of the release that last added to
+# what apps can rely on. Raised in the release that adds something.
+JUGGLE = "1.0"
+# Until v1.0, an app.json without "juggle" is still taken, so apps from before it run while they gain it
+JUGGLE_REQUIRED = False
+LEVEL = re.compile(r"(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})")
+# The onboard (headphone) audio's driver, which uses the PWM hardware
+AUDIO_MODULE = "snd_bcm2835"
+NAME = re.compile(r"[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?")
+VERSION = re.compile(r"[A-Za-z0-9._+-]{1,32}")
+# A bad manifest: the service doesn't restart the app (EX_CONFIG, in RestartPreventExitStatus)
+BAD_MANIFEST = 78
+# How long a newly installed app must keep running, and a new version installed on trial
+INSTALL_SECONDS = 10
+TRIAL_SECONDS = 30
+# How a trial went, for the app: {"version", "success", "message", "time"}
+RESULT = STATE / "update-result.json"
+APP_UID = 800
+
+
+class AppError(Exception):
+    pass
+
+
+def say(message):
+    print(message, file=sys.stderr, flush=True)
+
+
+def check_juggle(needed):
+    """Refuses an app that needs a Juggle OS version this OS doesn't give (app.json's "juggle", "MAJOR.MINOR"; ... if
+    it has none)."""
+    if needed is ...:
+        if JUGGLE_REQUIRED:
+            raise AppError(f'app.json doesn\'t say which Juggle OS it needs ("juggle": "{JUGGLE}", say).')
+        return
+    match = LEVEL.fullmatch(needed) if isinstance(needed, str) else None
+    if not match:
+        raise AppError('app.json\'s juggle must be "MAJOR.MINOR", such as "1.0".')
+    need = int(match[1]), int(match[2])
+    have = tuple(int(part) for part in JUGGLE.split("."))
+    if need[0] < have[0]:
+        raise AppError(f"The app is made for Juggle {need[0]}.x, and this OS gives Juggle {JUGGLE}: the app needs "
+                       "updating.")
+    if need > have:
+        raise AppError(f"The app needs Juggle {needed} or later, and this OS gives Juggle {JUGGLE}: update the OS.")
+
+
+def manifest(folder):
+    """The app in a folder: (name, version, root, pwm), from its app.json."""
+    if not (folder / "main.py").is_file():
+        raise AppError("There's no main.py.")
+    try:
+        data = json.loads((folder / "app.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise AppError("There's no app.json.") from None
+    except (ValueError, UnicodeError) as error:
+        raise AppError(f"app.json isn't valid JSON: {error}") from None
+    if not isinstance(data, dict):
+        raise AppError("app.json isn't a JSON object.")
+    # The version first: an app made for a later Juggle may have settings this OS doesn't know yet
+    check_juggle(data["juggle"] if "juggle" in data else ...)
+    if unknown := set(data) - KEYS:
+        raise AppError(f"app.json has settings Juggle OS doesn't know: {', '.join(sorted(unknown))}.")
+    name, version = data.get("name"), data.get("version")
+    root, pwm = data.get("root", False), data.get("pwm", False)
+    if not isinstance(name, str) or not NAME.fullmatch(name):
+        raise AppError("app.json's name must be lowercase letters, digits and hyphens, up to 32.")
+    if not isinstance(version, str) or not VERSION.fullmatch(version):
+        raise AppError("app.json's version must be letters, digits, dots, hyphens, + or _, up to 32.")
+    if not isinstance(root, bool):
+        raise AppError("app.json's root must be true or false.")
+    if not isinstance(pwm, bool):
+        raise AppError("app.json's pwm must be true or false.")
+    return name, version, root, pwm
+
+
+def refresh_screens():
+    subprocess.run(["/usr/lib/juggle/slot", "refresh"], check=False)
+
+
+def audio(on):
+    """Loads the onboard audio's driver, or unloads it so an app can have the PWM hardware."""
+    command = ["modprobe", AUDIO_MODULE] if on else ["modprobe", "--remove", AUDIO_MODULE]
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode != 0:
+        say(f"Couldn't {'load' if on else 'unload'} {AUDIO_MODULE}: {result.stderr.strip()}")
+    return result.returncode == 0
+
+
+def run():
+    INFO.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        name, version, root, pwm = manifest(APP)
+    except AppError as error:
+        INFO.write_text(f"APP_ERROR={shlex.quote(str(error))}\n")
+        say(f"Not starting the app: {error}")
+        sys.exit(BAD_MANIFEST)
+    if not audio(not pwm) and pwm:
+        sys.exit(1)
+    INFO.write_text(f"APP_NAME={name}\nAPP_VERSION={version}\n")
+    refresh_screens()
+    command = ["/usr/bin/python3", "main.py"]
+    if not root:
+        command = ["/usr/bin/setpriv", f"--reuid={USER}", f"--regid={USER}", "--init-groups",
+                   "--inh-caps=+net_bind_service", "--ambient-caps=+net_bind_service", "--", *command]
+    say(f"Starting {name} {version}{' as root' if root else ''}")
+    os.environ["JUGGLE"] = JUGGLE
+    os.execv(command[0], command)
+
+
+def systemctl(*args, check=True):
+    return subprocess.run(["systemctl", *args], capture_output=True, text=True, check=check)
+
+
+def empty(folder):
+    for path in folder.iterdir():
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+
+
+def unpack(archive):
+    """Unpacks an app's .tar beside /data/app (as app.new) and checks it: (folder, name, version)."""
+    new = APP.with_name("app.new")
+    shutil.rmtree(new, ignore_errors=True)
+    shutil.rmtree(APP.with_name("app.old"), ignore_errors=True)
+    new.mkdir(mode=0o755)
+    try:
+        with tarfile.open(archive) as tar:
+            tar.extractall(new, filter="data")
+        # Root's, and readable by the app user, whatever the PC's tar recorded
+        for path in [new, *new.rglob("*")]:
+            if not path.is_symlink():
+                os.chown(path, 0, 0)
+                path.chmod(0o755 if path.is_dir() else 0o644)
+        name, version, *_ = manifest(new)
+    except (AppError, tarfile.TarError, OSError) as error:
+        shutil.rmtree(new, ignore_errors=True)
+        raise AppError(f"Not installed: {error}") from None
+    return new, name, version
+
+
+def start_and_check(seconds):
+    """Starts the app; None if it's still running after seconds (and hasn't restarted), or its last messages."""
+    systemctl("reset-failed", SERVICE, check=False)
+    started = int(time.time())
+    systemctl("start", SERVICE)
+    time.sleep(seconds)
+    state = dict(line.split("=", 1) for line in
+                 systemctl("show", "-p", "SubState", "-p", "NRestarts", SERVICE).stdout.splitlines() if "=" in line)
+    if state.get("SubState") == "running" and state.get("NRestarts") == "0":
+        return None
+    return subprocess.run(["journalctl", "-u", SERVICE, f"--since=@{started}", "-n", "20", "--no-pager", "-o", "cat"],
+                          capture_output=True, text=True).stdout.rstrip()
+
+
+def install(archive):
+    new, name, version = unpack(archive)
+    old = APP.with_name("app.old")
+    try:
+        previous = manifest(APP)[0] if APP.exists() else None
+    except AppError:
+        previous = None
+    systemctl("stop", SERVICE)
+    if APP.exists():
+        os.rename(APP, old)
+    os.rename(new, APP)
+    shutil.rmtree(old, ignore_errors=True)
+    if previous != name:
+        empty(STATE)
+    os.sync()
+    say(f"Installed {name} {version}" + (f", replacing {previous} (its state is gone)" if previous not in (None, name) else ""))
+
+    # It must start and keep running
+    log = start_and_check(INSTALL_SECONDS)
+    if log is None:
+        say(f"{name} {version} is running")
+        return
+    raise AppError(f"{name} {version} didn't keep running. Its last messages:\n{log}")
+
+
+def report(version, success, message):
+    """Leaves how the trial went where the app can read it."""
+    RESULT.write_text(json.dumps({"version": version, "success": success, "message": message,
+                                  "time": int(time.time())}) + "\n", encoding="utf-8")
+    os.chown(RESULT, APP_UID, APP_UID)
+    RESULT.chmod(0o644)
+    os.sync()
+
+
+def trial(archive):
+    try:
+        new, name, version = unpack(archive)
+    except AppError as error:
+        report(None, False, str(error))
+        raise
+    try:
+        current, current_version, *_ = manifest(APP)
+    except AppError:
+        current = current_version = None
+    if name != current:
+        shutil.rmtree(new, ignore_errors=True)
+        message = f"Not installed: it's {name}, not {current} (a different app is installed with its deploy.ps1)."
+        report(version, False, message)
+        raise AppError(message)
+
+    old = APP.with_name("app.old")
+    systemctl("stop", SERVICE)
+    os.rename(APP, old)
+    os.rename(new, APP)
+    os.sync()
+    say(f"Trying {name} {version} (replacing {current_version})")
+    log = start_and_check(TRIAL_SECONDS)
+    if log is None:
+        shutil.rmtree(old)
+        os.sync()
+        say(f"{name} {version} is running: kept")
+        report(version, True, f"Updated to {version}.")
+        return
+    systemctl("stop", SERVICE)
+    shutil.rmtree(APP)
+    os.rename(old, APP)
+    os.sync()
+    say(f"{name} {version} didn't keep running: {current_version} is back. Its last messages:\n{log}")
+    report(version, False, f"{version} didn't keep running, so {current_version} is back. Its last messages:\n{log}")
+    start_and_check(0)
+
+
+def remove():
+    systemctl("stop", SERVICE)
+    systemctl("reset-failed", SERVICE, check=False)
+    if APP.exists():
+        name = None
+        try:
+            name = manifest(APP)[0]
+        except AppError:
+            pass
+        shutil.rmtree(APP)
+        say(f"Removed {name or 'the app'}")
+    else:
+        say("There's no app to remove")
+    empty(STATE)
+    INFO.unlink(missing_ok=True)
+    os.sync()
+    audio(True)
+    refresh_screens()
+
+
+def main():
+    args = sys.argv[1:]
+    try:
+        if args == ["run"]:
+            run()
+        elif len(args) == 2 and args[0] == "install":
+            install(args[1])
+        elif len(args) == 2 and args[0] == "trial":
+            try:
+                trial(args[1])
+            finally:
+                Path(args[1]).unlink(missing_ok=True)  # app-request's copy, in /run
+        elif args == ["remove"]:
+            remove()
+        else:
+            say(__doc__)
+            sys.exit(2)
+    except AppError as error:
+        say(str(error))
+        sys.exit(1)
+    except subprocess.CalledProcessError as error:
+        say(f"{' '.join(error.cmd)} failed: {(error.stderr or '').strip()}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

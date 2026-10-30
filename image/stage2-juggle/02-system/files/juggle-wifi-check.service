@@ -1,0 +1,14 @@
+[Unit]
+Description=Juggle Wi-Fi check: setup mode if Wi-Fi doesn't connect
+After=juggle-settings.service systemd-networkd.service wpa_supplicant@wlan0.service
+# Written by apply-settings when the Pi has Wi-Fi settings and the fallback is on
+ConditionPathExists=/run/juggle/wifi-check
+ConditionPathExists=!/run/juggle/setup
+
+[Service]
+# Not oneshot, so it doesn't hold up the system reaching "running" while it waits
+Type=simple
+ExecStart=/usr/lib/juggle/wifi-check
+
+[Install]
+WantedBy=multi-user.target

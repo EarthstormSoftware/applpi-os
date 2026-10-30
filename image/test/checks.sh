@@ -1,5 +1,5 @@
 #!/bin/bash
-# The checks of a running ApplPi OS, run on it as its admin user over SSH, by test-qemu.ps1 (qemu-virt.sh) and
+# The checks of a running Juggle OS, run on it as its admin user over SSH, by test-qemu.ps1 (qemu-virt.sh) and
 # test-pi.ps1. Prints what it looked at, then a line per check ("ok      <check>" or "FAILED  <check>: <why>"), and
 # exits 1 if any failed.
 #   checks.sh [qemu]   qemu: QEMU's machine, which has no hardware watchdog, and whose second boot starts the updated
@@ -9,13 +9,13 @@ mode=${1:-pi}
 echo "== Details"
 (
 	set -x
-	cat /etc/applpi-release; hostname; uptime
+	cat /etc/juggle-release; hostname; uptime
 	findmnt -n / ; findmnt -n /media/root-ro ; findmnt -n /data ; findmnt -n /boot/firmware
-	sudo -n /usr/lib/applpi/os-update status
+	sudo -n /usr/lib/juggle/os-update status
 	ls /boot/firmware /boot/firmware/slot? | grep -vE "\.dtb$"; grep "^os_prefix" /boot/firmware/config.txt
 	lsblk -o NAME,SIZE,FSTYPE,LABEL
 	sudo -n ls -l /data /data/settings /data/ssh
-	ls -l /run/applpi /run/applpi/authorized_keys
+	ls -l /run/juggle /run/juggle/authorized_keys
 	readlink /etc/localtime; date
 	ls -l /etc/resolv.conf; resolvectl status --no-pager | head -5
 	systemctl --failed --no-legend
@@ -25,11 +25,11 @@ echo "== Details"
 	systemd-analyze
 	systemd-analyze blame | head -12
 	systemctl show -p RuntimeWatchdogUSec; cat /sys/class/watchdog/watchdog0/state 2>&1
-	sudo -n journalctl -b -u applpi-data -u applpi-settings -u applpi-os-check --no-pager
+	sudo -n journalctl -b -u juggle-data -u juggle-settings -u juggle-os-check --no-pager
 	# SSH's connections this boot, with any it dropped (OpenSSH's penalties for connections that don't finish)
 	sudo -n journalctl -b -u ssh --no-pager | tail -40
-	systemctl status --no-pager --lines=5 applpi-app; sudo -n ls -l /data/app /data/app-state
-	bash /etc/update-motd.d/00-applpi | sed "s/\x1b\[[0-9;]*m//g" | tail -9
+	systemctl status --no-pager --lines=5 juggle-app; sudo -n ls -l /data/app /data/app-state
+	bash /etc/update-motd.d/00-juggle | sed "s/\x1b\[[0-9;]*m//g" | tail -9
 	grep -A2 "OS slot" /etc/issue
 ) 2>&1
 
@@ -71,18 +71,18 @@ no_partition_ids() {
 }
 
 mounts() {
-	systemctl is-active --quiet boot-firmware.mount || { echo "the boot partition isn't mounted by applpi-boot"; return 1; }
+	systemctl is-active --quiet boot-firmware.mount || { echo "the boot partition isn't mounted by juggle-boot"; return 1; }
 	findmnt -n /data > /dev/null || { echo "/data isn't mounted"; return 1; }
 }
 
 settings_applied() {
-	! ls /boot/firmware | grep -iE "applpi(\.json|-error\.txt)" || { echo "(left on the boot partition)"; return 1; }
-	[ -s /run/applpi/authorized_keys ] || { echo "no SSH keys in /run/applpi"; return 1; }
+	! ls /boot/firmware | grep -iE "juggle(\.json|-error\.txt)" || { echo "(left on the boot partition)"; return 1; }
+	[ -s /run/juggle/authorized_keys ] || { echo "no SSH keys in /run/juggle"; return 1; }
 }
 
 slot() {
 	local status running permanent tryboot waiting
-	status=$(sudo -n /usr/lib/applpi/os-update status) || { echo "os-update status failed"; return 1; }
+	status=$(sudo -n /usr/lib/juggle/os-update status) || { echo "os-update status failed"; return 1; }
 	running=$(sed -n 's/^running=//p' <<< "$status"); permanent=$(sed -n 's/^permanent=//p' <<< "$status")
 	tryboot=$(sed -n 's/^tryboot=//p' <<< "$status"); waiting=$(sed -n 's/^waiting=//p' <<< "$status")
 	[ "$running" = "$permanent" ] && return 0
@@ -100,21 +100,21 @@ watchdog() {
 # The guard of a trial boot (os-update guard): enabled, and finished without a fault, at once on a boot that isn't a
 # trial and once the check has decided on one (a trial boot that isn't kept is restarted, so never gets here)
 trial_guard() {
-	[ "$(systemctl is-enabled applpi-os-guard.service)" = enabled ] || { echo "applpi-os-guard isn't enabled"; return 1; }
+	[ "$(systemctl is-enabled juggle-os-guard.service)" = enabled ] || { echo "juggle-os-guard isn't enabled"; return 1; }
 	local state result
 	for _ in 1 2 3 4 5; do
-		state=$(systemctl show -p SubState --value applpi-os-guard); result=$(systemctl show -p Result --value applpi-os-guard)
+		state=$(systemctl show -p SubState --value juggle-os-guard); result=$(systemctl show -p Result --value juggle-os-guard)
 		[ "$state" = dead ] && break
 		sleep 2
 	done
-	[ "$state" = dead ] && [ "$result" = success ] || { echo "applpi-os-guard is $state ($result)"; return 1; }
+	[ "$state" = dead ] && [ "$result" = success ] || { echo "juggle-os-guard is $state ($result)"; return 1; }
 }
 
-# Only the services an ApplPi needs are running (and the update check and its guard, on a trial boot, the Wi-Fi check
+# Only the services a Juggle OS Pi needs are running (and the update check and its guard, on a trial boot, the Wi-Fi check
 # in the first minutes, and the SSH user's session)
 services() {
 	systemctl list-units --type=service --state=running --no-legend --plain | awk '{ print $1 }' | grep -vxE \
-		'applpi-(app|console-logo|os-check|os-guard|wifi-check)\.service|avahi-daemon\.service|dbus\.service|(serial-)?getty@tty(1|AMA0)\.service|ssh\.service|systemd-(journald|logind|networkd|resolved|timesyncd|udevd|hostnamed)\.service|user@[0-9]+\.service|wpa_supplicant@wlan0\.service' \
+		'juggle-(app|console-logo|os-check|os-guard|wifi-check)\.service|avahi-daemon\.service|dbus\.service|(serial-)?getty@tty(1|AMA0)\.service|ssh\.service|systemd-(journald|logind|networkd|resolved|timesyncd|udevd|hostnamed)\.service|user@[0-9]+\.service|wpa_supplicant@wlan0\.service' \
 		&& return 1 || return 0
 }
 
@@ -126,16 +126,16 @@ timers() {
 
 login_screens() {
 	grep -q "OS slot" /etc/issue || { echo "the console's text has no slot"; return 1; }
-	bash /etc/update-motd.d/00-applpi | grep -q "OS slot" || { echo "the SSH login screen has no slot"; return 1; }
+	bash /etc/update-motd.d/00-juggle | grep -q "OS slot" || { echo "the SSH login screen has no slot"; return 1; }
 	grep -q "App  " /etc/issue || { echo "the console's text has no app"; return 1; }
-	bash /etc/update-motd.d/00-applpi | grep -q "App  " || { echo "the SSH login screen has no app"; return 1; }
+	bash /etc/update-motd.d/00-juggle | grep -q "App  " || { echo "the SSH login screen has no app"; return 1; }
 }
 
 # If there's an app: running, not restarting, and its web page answering (any HTTP answer will do)
 app() {
 	[ -e /data/app/main.py ] || return 0
 	local state restarts
-	state=$(systemctl show -p SubState --value applpi-app); restarts=$(systemctl show -p NRestarts --value applpi-app)
+	state=$(systemctl show -p SubState --value juggle-app); restarts=$(systemctl show -p NRestarts --value juggle-app)
 	[ "$state" = running ] && [ "$restarts" = 0 ] || { echo "the app is $state, restarted $restarts times"; return 1; }
 	python3 -c 'import urllib.request, urllib.error, sys
 try:
@@ -144,11 +144,11 @@ except urllib.error.HTTPError:
     pass
 except OSError as error:
     sys.exit(f"its web page: {error}")' || return 1
-	# The app is told this OS's ApplPi version (APPLPI, the app contract's)
+	# The app is told this OS's Juggle OS version (JUGGLE, the app contract's)
 	local pid
-	pid=$(systemctl show -p MainPID --value applpi-app)
-	sudo -n cat "/proc/$pid/environ" | tr '\0' '\n' | grep -qxE 'APPLPI=[0-9]+\.[0-9]+' ||
-		{ echo "the app isn't given APPLPI"; return 1; }
+	pid=$(systemctl show -p MainPID --value juggle-app)
+	sudo -n cat "/proc/$pid/environ" | tr '\0' '\n' | grep -qxE 'JUGGLE=[0-9]+\.[0-9]+' ||
+		{ echo "the app isn't given JUGGLE"; return 1; }
 }
 
 # The compiled libraries for apps import, and the onboard audio is loaded unless the app uses the PWM hardware
@@ -174,12 +174,12 @@ sudo_works() {
 app_requests() {
 	local rights
 	rights=$(sudo -n -l -U app | sed -n '/may run the following/,$p' | tail -n +2 | sed 's/^ *//')
-	[ "$rights" = "(root) NOPASSWD: /usr/lib/applpi/app-request" ] || { echo "the app user may run: $rights"; return 1; }
-	sudo -n -u app sudo -n /usr/lib/applpi/app-request settings | grep -q '"time_zone"' || return 1
-	if sudo -n -u app sudo -n /usr/lib/applpi/app-request time-zone ../../etc/shadow 2> /dev/null; then
+	[ "$rights" = "(root) NOPASSWD: /usr/lib/juggle/app-request" ] || { echo "the app user may run: $rights"; return 1; }
+	sudo -n -u app sudo -n /usr/lib/juggle/app-request settings | grep -q '"time_zone"' || return 1
+	if sudo -n -u app sudo -n /usr/lib/juggle/app-request time-zone ../../etc/shadow 2> /dev/null; then
 		echo "app-request took a path for a time zone"; return 1
 	fi
-	[ "$(systemctl show -p NotifyAccess --value applpi-app)" = main ] || { echo "the app can't ask for a watchdog"; return 1; }
+	[ "$(systemctl show -p NotifyAccess --value juggle-app)" = main ] || { echo "the app can't ask for a watchdog"; return 1; }
 }
 
 echo
@@ -200,14 +200,14 @@ check read_only_root "read-only root"
 check no_root_login "root can't log in"
 check no_partition_ids "no partition IDs in fstab"
 check mounts "boot and data partitions mounted"
-check settings_applied "settings applied, applpi.json gone"
+check settings_applied "settings applied, juggle.json gone"
 check slot "running the permanent slot"
 [ "$mode" = qemu ] || check watchdog "hardware watchdog running"
 check services "only the expected services running"
 check trial_guard "the trial boot's guard is enabled, and done"
 check timers "no timers that change the system"
 check login_screens "login screens show the slot and the app"
-check app "the app runs, answers and is given APPLPI (if there is one)"
+check app "the app runs, answers and is given JUGGLE (if there is one)"
 check libraries "the libraries for apps import, audio as the app needs"
 check sudo_works "sudo works for the admin user"
 check app_requests "the app may ask app-request, and only that"

@@ -1,9 +1,0 @@
-<Solution>
-  <Folder Name="/src/">
-    <Project Path="src/ApplPi.Cli/ApplPi.Cli.csproj" />
-    <Project Path="src/ApplPi.Core/ApplPi.Core.csproj" />
-  </Folder>
-  <Folder Name="/tests/">
-    <Project Path="tests/ApplPi.Core.Tests/ApplPi.Core.Tests.csproj" />
-  </Folder>
-</Solution>

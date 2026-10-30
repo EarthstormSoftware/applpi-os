@@ -1,10 +1,10 @@
 ---
 name: test-image
-description: Boot a built ApplPi OS image in QEMU (image\test\test-qemu.ps1) and report what passed and failed. Use after building an image.
+description: Boot a built Juggle OS image in QEMU (image\test\test-qemu.ps1) and report what passed and failed. Use after building an image.
 argument-hint: "[quick] [image path]"
 ---
 
-Test an ApplPi OS image in QEMU. Arguments: $ARGUMENTS (`quick` boots once, about 20 minutes; the full test boots
+Test a Juggle OS image in QEMU. Arguments: $ARGUMENTS (`quick` boots once, about 20 minutes; the full test boots
 twice, about 35 minutes, and is needed for releases. An image path picks the image; the default is the newest in
 `deploy\`.)
 
@@ -13,7 +13,7 @@ twice, about 35 minutes, and is needed for releases. An image path picks the ima
 3. Run `.\image\test\test-qemu.ps1` (with `-Quick` and/or `-Image <path>`) in PowerShell, in the background, with its
    output redirected to a log in the scratchpad directory. Wait for the completion notification; don't poll.
 4. The script copies its results to `deploy\test\` (`summary.log`, `checks-N.log`, `console-N.log`) and then deletes
-   the `applpi-os-test` volume, so read them there. If the user's window closed mid-test, the container keeps running:
+   the `juggle-os-test` volume, so read them there. If the user's window closed mid-test, the container keeps running:
    wait for it to finish (`docker ps`) and read `deploy\test\` afterwards. From Git Bash, put `MSYS_NO_PATHCONV=1`
    before any `docker run -v vol:/work ...`, or `/work` becomes a Windows path.
 5. Report from `summary.log` and the checks logs: SSH up, system state and any failed units, listening ports (only

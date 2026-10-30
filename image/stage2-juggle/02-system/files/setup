@@ -1,0 +1,526 @@
+#!/usr/bin/python3
+"""Setup mode: a page for setting the Pi up without juggle, as the Picos have.
+
+apply-settings starts setup mode (/run/juggle/setup, which runs this as juggle-setup.service):
+  - when the Pi has no settings: until it's set up. The page is on the Juggle-SETUP hotspot and on Ethernet.
+  - when the Wi-Fi check asked for it (Wi-Fi didn't connect): for 10 minutes (the Wi-Fi fallback's for_minutes), on
+    the hotspot only, and then the Pi restarts with the settings it has.
+  - when the app asked for it (app-request setup: to rename the Pi, or change its Wi-Fi or keys): the same, but on
+    Ethernet too, as a wired Pi has no other way to the page.
+
+The page is HTTPS, with a certificate made the first time (kept on the data partition), so nothing sent on the open
+hotspot can be read by anyone listening. Its fingerprint is on the console, to check against the browser's. Plain
+HTTP (port 80) only says where the page is, and on the hotspot every name looks up to the Pi (captive DNS), so a
+phone shows its "sign in to network" page. The settings are checked as juggle.json's are (apply-settings' check()).
+"""
+
+import hashlib
+import html
+import importlib.util
+import ipaddress
+import json
+import os
+import socket
+import ssl
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
+from urllib.parse import parse_qs
+
+
+def load(name, path):
+    """A script without .py as a module."""
+    loader = SourceFileLoader(name, path)
+    module = importlib.util.module_from_spec(importlib.util.spec_from_loader(name, loader))
+    loader.exec_module(module)
+    return module
+
+
+# The settings' rules, and where they go, are apply-settings'
+settings_rules = load("apply_settings", "/usr/lib/juggle/apply-settings")
+
+SETUP = Path("/run/juggle/setup")
+CONSOLE = Path("/run/juggle/setup-console")
+SETTINGS = settings_rules.SETTINGS
+SETUP_NEXT = settings_rules.SETUP_NEXT
+HOST_KEY = settings_rules.HOST_KEY
+CERTIFICATE = Path("/data/setup/certificate.pem")
+CERTIFICATE_KEY = Path("/data/setup/key.pem")
+ZONEINFO = Path("/usr/share/zoneinfo")
+ADDRESS = settings_rules.SETUP_ADDRESS
+SSID = settings_rules.SETUP_SSID
+# With settings to go back to, setup mode ends after the Wi-Fi fallback's for_minutes, as on the Picos (but not while
+# the page is in use: each visit leaves at least IN_USE_SECONDS); once saved, the Pi restarts after RESTART_SECONDS if
+# the page doesn't ask first
+IN_USE_SECONDS = 300
+RESTART_SECONDS = 600
+LEDS = (Path("/sys/class/leds/ACT/trigger"), Path("/sys/class/leds/led0/trigger"))
+# The IP_FREEBIND socket option: the hotspot's address can be bound before the Wi-Fi dongle is up
+IP_FREEBIND = getattr(socket, "IP_FREEBIND", 15)
+LARGEST_FORM = 64 * 1024
+
+
+def say(message):
+    print(message, file=sys.stderr, flush=True)
+
+
+class Setup:
+    """What the page knows: the settings the Pi has (or None), the networks in range, and what was saved."""
+
+    def __init__(self, reason):
+        self.reason = reason
+        self.current = json.loads(SETTINGS.read_text(encoding="utf-8")) if SETTINGS.exists() else None
+        self.networks = []
+        self.saved = None
+        self.private_key = None
+        self.minutes = settings_rules.wifi_fallback(self.current or {})["for_minutes"]
+        self.restart_at = None if self.current is None else time.monotonic() + self.minutes * 60
+        self.lock = threading.Lock()
+
+    def scan(self):
+        """The Wi-Fi networks in range, strongest first (the dongle scans while it runs the hotspot)."""
+        try:
+            self.networks = settings_rules.scan_wifi(exclude=SSID)
+        except OSError as error:
+            say(f"Couldn't scan for Wi-Fi networks: {error}")
+            return
+        say(f"{len(self.networks)} Wi-Fi networks in range")
+
+    def save(self, form):
+        """Checks the form as juggle.json is checked and saves the settings, or returns what's wrong."""
+        hostname = form.get("hostname", "").strip().lower()
+        raw = {"hostname": hostname, "timezone": form.get("timezone") or None}
+        ssid = form.get("ssid_other", "").strip() or form.get("ssid", "")
+        password = form.get("password", "")
+        country = form.get("country", "")
+        kept_wifi = None
+        if ssid:
+            old = (self.current or {}).get("wifi")
+            if not password and old and old["ssid"] == ssid:
+                # The same network: its key stays
+                if not settings_rules.COUNTRY.fullmatch(country):
+                    return "Choose the country the Pi is in."
+                kept_wifi = dict(old, country=country)
+            else:
+                raw["wifi"] = {"country": country, "ssid": ssid, "password": password}
+
+        keys = form.get("keys", "")
+        new_key = None
+        if keys == "keep" and self.current:
+            raw["ssh_keys"] = self.current["ssh_keys"]
+        elif keys == "make":
+            new_key = make_key(hostname)
+            raw["ssh_keys"] = [new_key[1]]
+        else:
+            raw["ssh_keys"] = [line.strip() for line in form.get("public_key", "").splitlines() if line.strip()]
+            if not raw["ssh_keys"]:
+                return "Paste your SSH public key (from your .ssh folder, ending in .pub), or let the Pi make one."
+
+        if "fallback_after" in form:
+            try:
+                raw["wifi_fallback"] = {"enabled": "fallback_enabled" in form,
+                                        "after_minutes": int(form["fallback_after"]),
+                                        "for_minutes": int(form.get("fallback_for", ""))}
+            except ValueError:
+                return "The Wi-Fi fallback's times are whole minutes."
+
+        try:
+            settings = settings_rules.check(raw)
+        except settings_rules.SettingsError as error:
+            return f"Not saved: {error}."
+        settings.pop("host_key", None)
+        if kept_wifi:
+            settings["wifi"] = kept_wifi
+        for key in ("ntp", "wifi_fallback"):
+            if self.current and self.current.get(key) and key not in settings:
+                settings[key] = self.current[key]
+        # In the order check() gives, as juggle.json's are kept
+        order = ["hostname", "timezone", "ntp", "wifi", "wifi_fallback", "ssh_keys"]
+        settings = dict(sorted(settings.items(), key=lambda item: order.index(item[0])))
+
+        with self.lock:
+            settings_rules.write(SETTINGS, json.dumps(settings, indent=2) + "\n", 0o600)
+            SETUP_NEXT.unlink(missing_ok=True)
+            os.sync()
+            self.saved = settings
+            self.private_key = new_key[0] if new_key else None
+            self.restart_at = time.monotonic() + RESTART_SECONDS
+        say(f"Settings saved for {hostname}: restarting when the page asks, or in {RESTART_SECONDS // 60} minutes")
+        return None
+
+
+def make_key(hostname):
+    """A new SSH key pair, for someone without one: (private key, public key). Only kept until it's downloaded."""
+    with tempfile.TemporaryDirectory(dir="/run/juggle") as directory:
+        path = Path(directory) / "key"
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", f"juggle@{hostname or 'juggle'}",
+                        "-f", str(path)], check=True)
+        return path.read_text(), path.with_suffix(".pub").read_text().strip()
+
+
+def certificate():
+    """The page's certificate, made the first time, and its SHA-256 fingerprint as browsers show it."""
+    if not CERTIFICATE.exists() or not CERTIFICATE_KEY.exists():
+        CERTIFICATE.parent.mkdir(mode=0o700, exist_ok=True)
+        subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256",
+                        "-nodes", "-days", "3650", "-subj", "/CN=Juggle setup",
+                        "-addext", f"subjectAltName=IP:{ADDRESS},DNS:{socket.gethostname()}.local",
+                        "-keyout", str(CERTIFICATE_KEY), "-out", str(CERTIFICATE)],
+                       check=True, capture_output=True)
+        CERTIFICATE_KEY.chmod(0o600)
+        os.sync()
+    der = ssl.PEM_cert_to_DER_cert(CERTIFICATE.read_text())
+    return ":".join(f"{byte:02X}" for byte in hashlib.sha256(der).digest())
+
+
+def host_key():
+    """The Pi's SSH host key, as (its public key line, its SHA-256 fingerprint)."""
+    public = HOST_KEY.with_name(HOST_KEY.name + ".pub").read_text().split()
+    line = f"{public[0]} {public[1]}"
+    fingerprint = subprocess.run(["ssh-keygen", "-l", "-f", str(HOST_KEY) + ".pub"], capture_output=True,
+                                 text=True).stdout.split()
+    return line, fingerprint[1] if len(fingerprint) > 1 else ""
+
+
+def options(values, selected, labels=None):
+    return "".join(f'<option value="{html.escape(value)}"{" selected" if value == selected else ""}>'
+                   f'{html.escape((labels or {}).get(value, value))}</option>' for value in values)
+
+
+def time_zones():
+    """The time zones (from zone1970.tab) and the country each is in, from zone.tab, for the page to suggest one."""
+    zones, countries = set(), {}
+    for name in ("zone1970.tab", "zone.tab"):
+        for line in (ZONEINFO / name).read_text(encoding="utf-8").splitlines():
+            if line and not line.startswith("#"):
+                fields = line.split("\t")
+                zones.add(fields[2])
+                if name == "zone.tab":
+                    countries[fields[2]] = fields[0]
+    return sorted(zones | {"UTC"}), countries
+
+
+def country_names():
+    names = {}
+    for line in (ZONEINFO / "iso3166.tab").read_text(encoding="utf-8").splitlines():
+        if line and not line.startswith("#"):
+            code, name = line.split("\t", 1)
+            names[code] = f"{name} ({code})"
+    return names
+
+
+STYLE = """
+:root { color-scheme: light dark; --accent: #2e9e4f; --muted: #777; --line: #8884; }
+body { font-family: system-ui, sans-serif; margin: 0 auto; padding: 16px; max-width: 460px; line-height: 1.4; }
+h1 { font-size: 1.4em; margin: 0 0 4px; } h1 span { color: var(--accent); }
+label { display: block; margin-top: 14px; font-weight: 600; }
+input, select, textarea { box-sizing: border-box; width: 100%; margin-top: 4px; padding: 8px; font: inherit; }
+textarea { font-family: ui-monospace, monospace; font-size: 0.8em; }
+input[type=radio] { width: auto; margin: 0 6px 0 0; }
+.choice { font-weight: normal; margin-top: 6px; }
+button { margin-top: 18px; width: 100%; padding: 11px; font: inherit; font-weight: 600; color: #fff;
+  background: var(--accent); border: 0; border-radius: 6px; cursor: pointer; }
+.hint { color: var(--muted); font-size: 0.85em; margin: 4px 0 0; }
+.error { color: #c33; font-weight: 600; }
+code, pre { font-family: ui-monospace, monospace; font-size: 0.85em; word-break: break-all; white-space: pre-wrap; }
+pre { background: #8882; padding: 8px; border-radius: 4px; }
+fieldset { border: 1px solid var(--line); border-radius: 6px; margin-top: 16px; }
+"""
+
+
+def page(title, body):
+    return (f'<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
+            f'<meta name="viewport" content="width=device-width, initial-scale=1"><title>{html.escape(title)}</title>'
+            f'<style>{STYLE}</style></head><body><h1><span>Juggle</span> {html.escape(title)}</h1>{body}</body></html>')
+
+
+class Handler(BaseHTTPRequestHandler):
+    state: Setup
+    fingerprint: str
+    server_version = "Juggle-setup"
+    timeout = 30
+
+    def log_message(self, format, *args):
+        pass
+
+    def send(self, status, body, content_type="text/html; charset=utf-8", headers=()):
+        data = body.encode()
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        for name, value in headers:
+            self.send_header(name, value)
+        self.end_headers()
+        self.wfile.write(data)
+
+    def form_page(self, error=None, form=None):
+        setup, current = self.state, self.state.current or {}
+        form = form or {}
+        wifi = current.get("wifi") or {}
+        hostname = form.get("hostname") or current.get("hostname") or socket.gethostname()
+        ssid = form.get("ssid", wifi.get("ssid", setup.networks[0] if setup.networks else ""))
+        zones, zone_countries = time_zones()
+        zone = form.get("timezone") or current.get("timezone") or "Europe/London"
+        countries = country_names()
+        country = form.get("country") or wifi.get("country") or zone_countries.get(zone, "GB")
+        networks = setup.networks + ([wifi["ssid"]] if wifi and wifi["ssid"] not in setup.networks else [])
+        keys = form.get("keys") or ("keep" if current else "paste")
+        reason = {
+            "no-settings": "This Pi has no settings yet.",
+            "wifi": f"Wi-Fi didn't connect, so the Pi is in setup mode for {setup.minutes} minutes, then it tries "
+                    "again.",
+            "asked": f"Setup mode was asked for from the app's page. In {setup.minutes} minutes, unless you save, the "
+                     "Pi restarts with the settings it has.",
+        }.get(setup.reason, "")
+        fallback = settings_rules.wifi_fallback(current)
+        if "fallback_after" in form:
+            fallback = {"enabled": "fallback_enabled" in form, "after_minutes": form["fallback_after"],
+                        "for_minutes": form.get("fallback_for", "")}
+        limits = settings_rules.WIFI_FALLBACK_LIMITS
+        keep = ('<label class="choice"><input type="radio" name="keys" value="keep"'
+                f'{" checked" if keys == "keep" else ""}>Keep the keys it has</label>') if current else ""
+        body = f"""
+<p class="hint">{html.escape(reason)}</p>
+{f'<p class="error">{html.escape(error)}</p>' if error else ''}
+<form method="post" action="/save">
+<label for="hostname">Name</label>
+<input id="hostname" name="hostname" value="{html.escape(hostname)}" required
+  pattern="[a-z0-9]([a-z0-9\\-]{{0,61}}[a-z0-9])?" autocapitalize="none" autocomplete="off">
+<p class="hint">Lower-case letters, digits and hyphens. The Pi is then at <code>name.local</code>.</p>
+<label for="ssid">Wi-Fi network</label>
+<select id="ssid" name="ssid"><option value="">None (Ethernet only)</option>{options(networks, ssid)}</select>
+<p class="hint">{len(setup.networks)} found. <a href="/scan">Look again</a> if yours isn't there.</p>
+<label for="ssid_other">Or its name, for a hidden network</label>
+<input id="ssid_other" name="ssid_other" value="{html.escape(form.get('ssid_other', ''))}" autocapitalize="none"
+  autocomplete="off">
+<label for="password">Wi-Fi password</label>
+<input id="password" name="password" type="password" autocomplete="off">
+{'<p class="hint">Leave it empty to keep the one it has for that network.</p>' if wifi else ''}
+<label for="timezone">Time zone</label>
+<select id="timezone" name="timezone">{options(zones, zone)}</select>
+<label for="country">Country (for Wi-Fi's rules)</label>
+<select id="country" name="country">{options(sorted(countries, key=countries.get), country, countries)}</select>
+<fieldset><legend>SSH key, for logging in</legend>
+{keep}
+<label class="choice"><input type="radio" name="keys" value="paste"{" checked" if keys == "paste" else ""}>Use my public
+  key</label>
+<textarea id="public_key" name="public_key" rows="4" placeholder="ssh-ed25519 AAAA... (from .ssh\\id_ed25519.pub)"
+  >{html.escape(form.get('public_key', ''))}</textarea>
+<input id="key_file" type="file" accept=".pub" aria-label="Or choose the .pub file">
+<p class="hint">Paste it, or choose the <code>.pub</code> file.</p>
+<label class="choice"><input type="radio" name="keys" value="make"{" checked" if keys == "make" else ""}>Make a key
+  for me (to download next)</label>
+</fieldset>
+<fieldset><legend>If Wi-Fi doesn't connect</legend>
+<label class="choice"><input type="checkbox" name="fallback_enabled"{" checked" if fallback["enabled"] else ""}
+  style="width:auto;margin:0 6px 0 0">Come back to setup mode</label>
+<label for="fallback_after">After this many minutes without a network</label>
+<input id="fallback_after" name="fallback_after" type="number" min="{limits['after_minutes'][0]}"
+  max="{limits['after_minutes'][1]}" value="{html.escape(str(fallback['after_minutes']))}" required>
+<label for="fallback_for">For this many minutes, then try Wi-Fi again</label>
+<input id="fallback_for" name="fallback_for" type="number" min="{limits['for_minutes'][0]}"
+  max="{limits['for_minutes'][1]}" value="{html.escape(str(fallback['for_minutes']))}" required>
+</fieldset>
+<button type="submit">Save</button>
+</form>
+<script>
+const countries = {json.dumps(zone_countries)};
+document.getElementById("timezone").addEventListener("change", e => {{
+  const code = countries[e.target.value];
+  if (code) document.getElementById("country").value = code;
+}});
+// The public key from its file, into the box (it's only text, and not secret)
+document.getElementById("key_file").addEventListener("change", async e => {{
+  const file = e.target.files[0];
+  if (!file) return;
+  document.getElementById("public_key").value = (await file.text()).trim();
+  document.querySelector('input[name="keys"][value="paste"]').checked = true;
+}});
+</script>"""
+        return page("Setup", body)
+
+    def done_page(self):
+        setup = self.state
+        name = setup.saved["hostname"]
+        line, fingerprint = host_key()
+        key = ""
+        if setup.private_key:
+            key = (f'<p><a href="/key" download="juggle-{html.escape(name)}">Download the private key</a> now: the Pi '
+                   'forgets it after one download. Keep it in your <code>.ssh</code> folder, and log in with '
+                   f'<code>ssh -i juggle-{html.escape(name)} juggle@{html.escape(name)}.local</code></p>')
+        body = f"""
+<p>Saved. The Pi restarts as <b>{html.escape(name)}</b> when you press Restart (or in {RESTART_SECONDS // 60}
+minutes), then joins {html.escape(setup.saved['wifi']['ssid']) if setup.saved.get('wifi') else 'the wired network'}.</p>
+{key}
+<p>Log in with <code>ssh juggle@{html.escape(name)}.local</code>. SSH asks once whether to trust the Pi: it's this
+Pi if the fingerprint it shows is</p>
+<pre>{html.escape(fingerprint)}</pre>
+<p class="hint">Or add this line to <code>.ssh/known_hosts</code> first, and SSH doesn't need to ask:</p>
+<pre>{html.escape(name)}.local {html.escape(line)}</pre>
+<form method="post" action="/restart"><button type="submit">Restart</button></form>"""
+        return page("Setup", body)
+
+    def do_GET(self):
+        if not isinstance(self.connection, ssl.SSLSocket):
+            self.plain()
+            return
+        path = self.path.split("?", 1)[0]
+        if path == "/scan" and not self.state.saved:
+            self.state.scan()
+            self.send(303, "", headers=[("Location", "/")])
+        elif path == "/key" and self.state.private_key:
+            with self.state.lock:
+                key, self.state.private_key = self.state.private_key, None
+            self.send(200, key, "application/octet-stream",
+                      [("Content-Disposition", f'attachment; filename="juggle-{self.state.saved["hostname"]}"')])
+        elif path == "/":
+            if not self.state.saved and self.state.restart_at is not None:
+                self.state.restart_at = max(self.state.restart_at, time.monotonic() + IN_USE_SECONDS)
+            self.send(200, self.done_page() if self.state.saved else self.form_page())
+        else:
+            self.send(303, "", headers=[("Location", "/")])
+
+    def do_POST(self):
+        if not isinstance(self.connection, ssl.SSLSocket):
+            self.plain()
+            return
+        # Only from the page itself
+        origin = self.headers.get("Origin")
+        if origin and origin.split("://", 1)[-1] != self.headers.get("Host", ""):
+            self.send(403, page("Setup", "<p>Not from this page.</p>"))
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        if length > LARGEST_FORM:
+            self.send(413, page("Setup", "<p>Too much.</p>"))
+            return
+        form = {key: values[0] for key, values in parse_qs(self.rfile.read(length).decode("utf-8", "replace"),
+                                                           keep_blank_values=True).items()}
+        if self.path == "/save" and not self.state.saved:
+            error = self.state.save(form)
+            if error:
+                self.send(400, self.form_page(error, form))
+            else:
+                self.send(303, "", headers=[("Location", "/")])
+        elif self.path == "/restart" and self.state.saved:
+            self.send(200, page("Setup", f"<p>Restarting. In about a minute it's at "
+                                         f"<code>{html.escape(self.state.saved['hostname'])}.local</code>.</p>"))
+            restart()
+        else:
+            self.send(303, "", headers=[("Location", "/")])
+
+    def plain(self):
+        """Port 80: where the page is (a phone's sign-in check lands here too, through the captive DNS)."""
+        host = self.headers.get("Host", "").rsplit(":", 1)[0] if "]" not in self.headers.get("Host", "") else ""
+        where = host if host.endswith(".local") or is_address(host) else ADDRESS
+        body = f"""
+<p>The setup page is at</p>
+<p><a href="https://{html.escape(where)}/"><b>https://{html.escape(where)}/</b></a></p>
+<p>Your browser warns that it can't check the page's certificate: the Pi made it itself. It's this Pi if the
+certificate's SHA-256 fingerprint is the one on the Pi's screen:</p>
+<pre>{html.escape(self.fingerprint)}</pre>"""
+        self.send(200, page("Setup", body))
+
+
+def is_address(text):
+    try:
+        ipaddress.IPv4Address(text)
+        return True
+    except ValueError:
+        return False
+
+
+def restart():
+    subprocess.run(["systemctl", "--no-block", "reboot"])
+
+
+def captive_dns():
+    """Answers every name looked up on the hotspot with the Pi's address."""
+    answer_address = socket.inet_aton(ADDRESS)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_IP, IP_FREEBIND, 1)
+    sock.bind((ADDRESS, 53))
+    while True:
+        try:
+            query, client = sock.recvfrom(512)
+            # Only queries: one question, not a response; anything malformed is ignored
+            if len(query) < 12 or query[2] & 0x80 or int.from_bytes(query[4:6], "big") != 1:
+                continue
+            end = 12
+            while end < len(query) and query[end] != 0:
+                end += query[end] + 1
+            if end + 5 > len(query):
+                continue
+            question = query[12:end + 5]
+            qtype = int.from_bytes(query[end + 1:end + 3], "big")
+            # A records get the Pi's address; anything else (AAAA, say) an empty answer, so clients use IPv4
+            answers = 1 if qtype == 1 else 0
+            header = query[:2] + b"\x81\x80" + (1).to_bytes(2, "big") + answers.to_bytes(2, "big") + bytes(4)
+            answer = b"\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\x3c\x00\x04" + answer_address if answers else b""
+            sock.sendto(header + question + answer, client)
+        except OSError as error:
+            say(f"Captive DNS: {error}")
+
+
+def server(address, port, handler, context=None):
+    httpd = ThreadingHTTPServer((address, port), handler, bind_and_activate=False)
+    httpd.daemon_threads = True
+    httpd.socket.setsockopt(socket.SOL_IP, IP_FREEBIND, 1)
+    httpd.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    httpd.server_bind()
+    httpd.server_activate()
+    if context:
+        # The handshake happens in the request's own thread, so a slow client doesn't hold up the others
+        httpd.socket = context.wrap_socket(httpd.socket, server_side=True, do_handshake_on_connect=False)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+
+
+def console(fingerprint, everywhere):
+    """What the console shows: how to reach the page, and the certificate's fingerprint (in two lines)."""
+    halves = fingerprint[:48], fingerprint[48:]
+    lines = [f"Setup         Join the {SSID} Wi-Fi and open https://{ADDRESS}/"]
+    if everywhere:
+        lines.append(f"              or on this network, https://{socket.gethostname()}.local/")
+    lines += [f"Certificate   SHA-256 {halves[0]}", f"                      {halves[1]}"]
+    settings_rules.write(CONSOLE, "\n".join(lines) + "\n", 0o644)
+    subprocess.run(["/usr/lib/juggle/slot", "refresh"])
+
+
+def main():
+    if not SETUP.exists():
+        say("Not in setup mode")
+        return 0
+    setup = Setup(SETUP.read_text().strip())
+    fingerprint = certificate()
+    Handler.state, Handler.fingerprint = setup, fingerprint
+    # Without settings or when the app asked, on Ethernet too; when Wi-Fi didn't connect, on the hotspot only
+    everywhere = setup.current is None or setup.reason == "asked"
+    address = "0.0.0.0" if everywhere else ADDRESS
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(CERTIFICATE, CERTIFICATE_KEY)
+    server(address, 443, Handler, context)
+    server(address, 80, Handler)
+    threading.Thread(target=captive_dns, daemon=True).start()
+    for led in LEDS:
+        if led.exists():
+            led.write_text("heartbeat")
+            break
+    console(fingerprint, everywhere)
+    say(f"Setup mode ({setup.reason}): join {SSID} and open https://{ADDRESS}/. Certificate SHA-256 {fingerprint}")
+    setup.scan()
+
+    while True:
+        time.sleep(5)
+        if setup.restart_at is not None and time.monotonic() > setup.restart_at:
+            say("Restarting" if setup.saved else "Setup mode is over: restarting with the settings the Pi has")
+            restart()
+            return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

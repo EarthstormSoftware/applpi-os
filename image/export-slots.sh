@@ -7,7 +7,7 @@ boot="${ROOTFS_DIR}/boot/firmware"
 install -d "${boot}/slotA"
 mv "${boot}"/kernel*.img "${boot}"/initramfs* "${boot}"/*.dtb "${boot}/overlays" "${boot}/cmdline.txt" "${boot}/slotA/"
 # Each slot says which OS it holds; the copy at the top is the permanent slot's
-cp "${boot}/applpi-release.txt" "${boot}/slotA/"
+cp "${boot}/juggle-release.txt" "${boot}/slotA/"
 cat >> "${boot}/config.txt" <<- EOF
 
 	# The OS slot: its kernel, initramfs, device trees, overlays and cmdline.txt. An OS update tries the other slot

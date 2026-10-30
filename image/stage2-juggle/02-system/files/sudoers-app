@@ -1,0 +1,2 @@
+# The app user may ask the OS for what app-request allows (a new version of itself, the clock, a restart), nothing else
+app ALL=(root) NOPASSWD: /usr/lib/juggle/app-request

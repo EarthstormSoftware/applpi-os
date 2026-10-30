@@ -1,9 +1,15 @@
 # Roadmap
 
-ApplPi OS turns older Raspberry Pis (the Pi 2 first) into appliances that need as little looking after as a Pico W:
+Juggle OS turns older Raspberry Pis (the Pi 2 first) into appliances that need as little looking after as a Pico W:
 a frozen, read-only OS image, one or more Python apps on a separate data partition, and nothing running or
 listening that isn't needed. The OS is only changed by building and installing a new image; apps are deployed on
 their own, from their own repos, and an OS update never touches them.
+
+It was called ApplPi OS up to v0.6.0, and renamed Juggle OS on 2026-10-30, with a new logo: three balls on a juggler's
+figure of eight. Everything that carried the name changes with the next release (the `juggle` command and user, the
+`juggle-*` services, `/usr/lib/juggle`, `juggle.json` on the boot partition, the `Juggle-SETUP` hotspot,
+`"juggle"` in `app.json` and `JUGGLE` for apps). Nothing reads the old names: a Pi with an ApplPi OS release is
+flashed again, and the tools' saved devices move from `ApplPi` to `Juggle` by hand.
 
 ## Design
 
@@ -28,7 +34,7 @@ Stripped and locked down:
   the Pi 3/4 and later (v8) only, and no kernel headers.
 - Root filesystem read-only, with changes kept in RAM (`overlayroot=tmpfs`, as raspi-config's overlay file system),
   so pulling the power is harmless and the card isn't worn. Logs are kept in RAM too.
-- SSH by key only, no passwords, for one admin user, `applpi` (passwordless sudo; root can't log in). Listening: SSH,
+- SSH by key only, no passwords, for one admin user, `juggle` (passwordless sudo; root can't log in). Listening: SSH,
   mDNS (for `<name>.local`) and the apps' own ports. Nothing else.
 - Network: systemd-networkd (DHCP on Ethernet and Wi-Fi), wpa_supplicant, systemd-resolved (local stub only, no
   LLMNR), Avahi for mDNS.
@@ -44,7 +50,7 @@ in the way that matters here).
 
 | Partition | Holds | Changed by |
 |---|---|---|
-| boot (FAT) | firmware, `config.txt`, `slotA/` and `slotB/` (kernels, initramfs, device trees, overlays, `cmdline.txt`), `applpi.json` until first boot | OS updates (the inactive slot only) |
+| boot (FAT) | firmware, `config.txt`, `slotA/` and `slotB/` (kernels, initramfs, device trees, overlays, `cmdline.txt`), `juggle.json` until first boot | OS updates (the inactive slot only) |
 | root A | the OS, read-only | OS updates |
 | root B | the other OS slot, read-only | OS updates |
 | data (ext4) | `/data/apps/<name>`, app settings, Wi-Fi details, SSH host keys | app deploys |
@@ -57,24 +63,24 @@ firmware is about 23 MB and a slot's boot files about 57 MB, so it holds both sl
 the build checks the other slot would fit twice over. (It can't grow once a Pi is in use, as the root slots follow
 it.) A 4 GB card keeps about 0.8 GiB for data. If the root outgrows its slot, apt's package lists, other
 locales and the docs (about 190 MB) can go: nothing is installed on the Pi itself. Root B and the data partition are created on first
-boot (`applpi-data.service`), the data partition filling the rest of the card. The SSH host key lives on the data
+boot (`juggle-data.service`), the data partition filling the rest of the card. The SSH host key lives on the data
 partition, so a Pi keeps the same identity across OS updates.
 
 ### Device settings and first boot
 
-Windows can't write ext4, so the flash tool writes the device's settings to `applpi.json` on the boot partition
-(format: `image\applpi.example.json`): hostname, time zone, Wi-Fi country, network and password, SSH public key(s),
+Windows can't write ext4, so the flash tool writes the device's settings to `juggle.json` on the boot partition
+(format: `image\juggle.example.json`): hostname, time zone, Wi-Fi country, network and password, SSH public key(s),
 and optionally the Wi-Fi fallback (whether, after how long and for how long setup mode starts when Wi-Fi doesn't
 connect: see step 7).
-At boot, `applpi-settings.service` checks the file, moves the settings to the data partition (keeping the Wi-Fi key
-made from the password, not the password) and deletes `applpi.json`, so the password doesn't stay on the FAT
-partition. `applpi.json` can also carry the Pi's SSH host key: `applpi` makes one per Pi, keeps it (encrypted) with
+At boot, `juggle-settings.service` checks the file, moves the settings to the data partition (keeping the Wi-Fi key
+made from the password, not the password) and deletes `juggle.json`, so the password doesn't stay on the FAT
+partition. `juggle.json` can also carry the Pi's SSH host key: `juggle` makes one per Pi, keeps it (encrypted) with
 the Pi's settings and adds it to `known_hosts`, so a reflashed Pi keeps its identity; without one, the Pi makes its
-own. If the file is wrong, it is deleted anyway and the reason is left in `applpi-error.txt` on the boot
+own. If the file is wrong, it is deleted anyway and the reason is left in `juggle-error.txt` on the boot
 partition. Then, at every boot, it sets the hostname, time zone, Wi-Fi and SSH keys from the data partition: the root
 is read-only, so they are written to RAM.
 
-Per-device details are kept outside the repo, in `%APPDATA%\ApplPi` (only `*.example.json` files are committed).
+Per-device details are kept outside the repo, in `%APPDATA%\Juggle` (only `*.example.json` files are committed).
 
 ### OS updates (A/B)
 
@@ -86,30 +92,30 @@ answering), makes itself permanent by switching `config.txt`. Any reset before t
 hangs, a power cut, a kernel that doesn't start) boots `config.txt`, the old slot, again. Checked on the Pi 2 (firmware
 of Sep 2026): tryboot.txt was used for exactly one boot.
 
-`applpi update <name>` sends the `.img.xz` over SSH to `os-update write` on the Pi
-(`/usr/lib/applpi/os-update`, Python, as root). It decompresses as the image arrives, writes the image's root
+`juggle update <name>` sends the `.img.xz` over SSH to `os-update write` on the Pi
+(`/usr/lib/juggle/os-update`, Python, as root). It decompresses as the image arrives, writes the image's root
 partition straight into the other slot's partition and reads it back to compare checksums, and keeps the boot
 partition (as a sparse file on the data partition) just long enough to copy its `slotA/` into the other slot's
 folder, with `root=` in its `cmdline.txt` set for that slot. Then it writes `tryboot.txt`: the new image's
-`config.txt`, starting the new slot. `os-update try` restarts with tryboot, and `applpi` waits for the Pi to answer
+`config.txt`, starting the new slot. `os-update try` restarts with tryboot, and `juggle` waits for the Pi to answer
 from a new boot (the boot ID changes). The Pi then decides for itself whether to keep the new slot:
-`applpi-os-check.service` runs `os-update check` at every boot, and on a trial boot it waits (up to 5 minutes) for
+`juggle-os-check.service` runs `os-update check` at every boot, and on a trial boot it waits (up to 5 minutes) for
 the system to finish starting with no failed units, SSH running and a routable network. Then `os-update commit`
 makes the slot permanent (`tryboot.txt` becomes `config.txt`); otherwise the Pi restarts, which starts the old slot.
-`applpi` shows the verdict (`check=` in `os-update status`). The other ways a trial boot can fail also end in a
+`juggle` shows the verdict (`check=` in `os-update status`). The other ways a trial boot can fail also end in a
 restart into the old slot: a kernel panic or an initramfs that can't mount the root (`panic=10` on the kernel command
 line), a hang (systemd drives the BCM2835 hardware watchdog, 15 s), and emergency or rescue mode (their shells can't
 be used anyway, as root has no password). A boot that never gets to its check, or stops part way while systemd still
 feeds the watchdog (the card no longer answering, say), is restarted by `os-update guard`
-(`applpi-os-guard.service`, from early in the boot, at a real-time priority, reading only memory) if the slot isn't
+(`juggle-os-guard.service`, from early in the boot, at a real-time priority, reading only memory) if the slot isn't
 kept within 15 minutes. Whatever the cause, the next boot notes a trial that restarted before its check as failed
-("It restarted before it could check itself"), for `applpi` to show. The running slot is never written, and a slot on trial can't be updated
+("It restarted before it could check itself"), for `juggle` to show. The running slot is never written, and a slot on trial can't be updated
 until it's kept or left. The firmware isn't updated (only flashing changes it). The full QEMU test writes an update
 and boots the other slot, but QEMU can't do tryboot: the trial boot is checked on the Pi.
 
 Nothing in the root names the image's own partition IDs, because an update puts another image (with other IDs) in
 the other slot. `fstab` only has `/proc`: the initramfs mounts the root named by `root=PARTUUID=` on the kernel
-command line, and a systemd generator (`applpi-boot`) mounts partition 1 of the same card (the disk ID from `root=`)
+command line, and a systemd generator (`juggle-boot`) mounts partition 1 of the same card (the disk ID from `root=`)
 at `/boot/firmware`, as `mount-data` finds the data partition. The one ID left is `root=` in the slot's
 `cmdline.txt`: the image's own on a newly flashed card (the card has the image's disk ID), and written by the update
 from the card's disk ID and the slot's partition (`-02` for A, `-03` for B).
@@ -124,30 +130,30 @@ What an app can rely on, which v1.0 freezes, is in [the app contract](app-contra
 - Each app is its own repo. Its `deploy.ps1`, like the Pico firmware's, copies it over SSH to `/data/app` and
   restarts it. The app starts at `main.py`, as on a Pico, with its pure-Python libraries (Microdot among them) in
   `lib/`. Compiled libraries belong in the OS image.
-- It runs as one systemd service, `applpi-app`, which restarts it if it stops. With no app in `/data/app`, the
+- It runs as one systemd service, `juggle-app`, which restarts it if it stops. With no app in `/data/app`, the
   service doesn't start.
 - The app's web page is on port 80, as on the Pico, so it's at `http://<name>.local`. systemd gives the app the
   right to use port 80 without it being root.
 - A small manifest, `app.json`: name, version and whether it needs root (`rpi_ws281x` does). Otherwise it runs as
-  its own user, `app` (not `applpi`), which may use all the hardware, as on a Pico: GPIO, I2C and SPI (udev rules
+  its own user, `app` (not `juggle`), which may use all the hardware, as on a Pico: GPIO, I2C and SPI (udev rules
   give their groups the devices), the display, touch and serial ports. Switching on I2C or SPI in `config.txt` is
   for when an app needs it. `"pwm": true` says the app uses the PWM hardware (WS2812 LEDs on GPIO 18, as the Unicorn
   HAT), which the onboard audio also uses: its driver (`snd_bcm2835`) is unloaded while that app runs, and loaded
   for any other app or none, so Pis without one keep their audio.
 - Compiled libraries for apps come in the image, from piwheels' wheels for Raspberry Pi OS, each pinned to its
-  SHA-256 (`image/stage2-applpi/05-libraries`): `rpi_ws281x` for WS2812 LEDs.
+  SHA-256 (`image/stage2-juggle/05-libraries`): `rpi_ws281x` for WS2812 LEDs.
 - The image's `app` command installs an app from a `.tar` of its folder (which `deploy.ps1` copies over), checks
   its manifest first and that it keeps running after, and removes it. A different app (another name) starts with
   empty state.
 - An OS update checks the app too: if it was running before the update, the trial boot is only kept if the app
   keeps running for 30 seconds.
-- What the app may ask the OS (v0.4, for App Base, so an ApplPi app's page can change what a Pico's can):
-  `/usr/lib/applpi/app-request`, which the `app` user may run as root by `sudo`, and nothing else. It installs a new
+- What the app may ask the OS (v0.4, for App Base, so a Juggle app's page can change what a Pico's can):
+  `/usr/lib/juggle/app-request`, which the `app` user may run as root by `sudo`, and nothing else. It installs a new
   version of the app sent over the network (`update`, from `/data/app-state/update.tar`, opened without following
   links: in its own unit, as the app is restarted; on trial, with the old version kept until the new one has run
   for 30 seconds, and put back otherwise; `/data/app-state/update-result.json` says how it went), sets the time zone
   and the time server (kept in `device.json`, applied at once and at each boot), and restarts the Pi. Starting setup
-  mode comes with step 7 (the name and Wi-Fi are changed there, as the name is how SSH and `applpi` know the Pi).
+  mode comes with step 7 (the name and Wi-Fi are changed there, as the name is how SSH and `juggle` know the Pi).
 - `systemd`'s watchdog for the app, so a hung app (not only one that stops) is restarted: the app asks for it itself
   (`WATCHDOG_USEC=`, then `WATCHDOG=1` while its event loop runs, as App Base does; the service has
   `NotifyAccess=main`), so an app that doesn't ask has none.
@@ -162,22 +168,22 @@ What an app can rely on, which v1.0 freezes, is in [the app contract](app-contra
 ### Builds
 
 - `image\build.ps1` builds the image in Docker (Docker Desktop on Windows): pi-gen at a fixed release tag, its stages
-  0 and 1 (a bare bootable system) and our `stage2-applpi` in place of the Lite stage, which brings in compilers,
+  0 and 1 (a bare bootable system) and our `stage2-juggle` in place of the Lite stage, which brings in compilers,
   Bluetooth, cloud-init and swap. The image goes in `deploy\`.
 - Builds are local until the image works on the test Pi. Then GitHub Actions (free for a public repo) runs the same
   container (`.github/workflows/image.yml`, from v0.4): a tag makes a draft release with the image, its `.bmap` and
   `SHA256SUMS`, published once its notes are written; run by hand from any branch, it keeps a test build for a week.
   Each release keeps its image (compressed) and checksum. A rebuild fetches whatever packages are current, so the
-  kept images, not the build, are what's frozen. `applpi flash` and `update` take a release (`latest`, or `v0.4.0`)
-  as well as a file, download it to `%LOCALAPPDATA%\ApplPi\images` and check it against `SHA256SUMS`; with no image
+  kept images, not the build, are what's frozen. `juggle flash` and `update` take a release (`latest`, or `v0.4.0`)
+  as well as a file, download it to `%LOCALAPPDATA%\Juggle\images` and check it against `SHA256SUMS`; with no image
   named and none built in `deploy\`, they use the latest release.
-- Versions are semantic (`vMAJOR.MINOR.PATCH`) and come from git tags, for the image and the `applpi` tool alike:
+- Versions are semantic (`vMAJOR.MINOR.PATCH`) and come from git tags, for the image and the `juggle` tool alike:
   `git describe` gives `v0.1.0` for a release and `v0.1.0-3-g1ad84dc` (plus `-dirty` for uncommitted changes) for a
   development build. Major: something apps rely on changes; minor: features and new libraries; patch: fixes. 0.x
   until the app manifest and OS updates are settled. Each image records `VERSION`, `COMMIT` and `BUILD_STAMP` (UTC,
   `20261016-2249`; `v0.1.0` has `BUILD_DATE`) in
-  `/etc/applpi-release` and in `applpi-release.txt` on the boot partition, shows them on the console, and is named
-  `applpi-os-<version>.img.xz`.
+  `/etc/juggle-release` and in `juggle-release.txt` on the boot partition, shows them on the console, and is named
+  `juggle-os-<version>.img.xz`.
 - The Synology DS420+ was ruled out as a builder: 2 cores emulating ARM, and an old (4.4) kernel that may lack the
   `binfmt_misc` support the build needs. It is a good place to keep a copy of the images.
 - While developing, changes are tried on the test Pi first (temporarily writable), then put into the build, so a
@@ -185,12 +191,12 @@ What an app can rely on, which v1.0 freezes, is in [the app contract](app-contra
 
 ### Tools on Windows (and Linux)
 
-`applpi`, a .NET command line: list USB card readers (removable disks only, with their size and name, and a
-confirmation before writing), download a release image and check it, write it, add `applpi.json`, and update a Pi's
+`juggle`, a .NET command line: list USB card readers (removable disks only, with their size and name, and a
+confirmation before writing), download a release image and check it, write it, add `juggle.json`, and update a Pi's
 OS over SSH. A small app for flashing, on the same code, comes once the steps are settled. Writing the card
 needs admin rights; nothing else does.
 
-Linux too (assessed 2026-10-27, about 2 to 3 days, most of it flashing and testing it): most of `applpi` is plain
+Linux too (assessed 2026-10-27, about 2 to 3 days, most of it flashing and testing it): most of `juggle` is plain
 .NET 10 and already runs there. `update` and `forget` only use OpenSSH, `%APPDATA%` becomes `~/.config`, and the
 PowerShell scripts run on `pwsh` with Docker native (they may need path fixes or short `.sh` versions). What is
 Windows-only, about 300 of the tool's 1,600 lines:
@@ -207,7 +213,7 @@ Windows-only, about 300 of the tool's 1,600 lines:
 - `net10.0-windows` becomes `net10.0`, with Windows and Linux versions of the parts above.
 
 Testing it needs a Linux machine with a card reader: WSL2 with the reader passed through by
-[usbipd-win](https://github.com/dorssel/usbipd-win) (decided 2026-10-29, for v1), and a Pi running `applpi` with a
+[usbipd-win](https://github.com/dorssel/usbipd-win) (decided 2026-10-29, for v1), and a Pi running `juggle` with a
 reader in its USB port, which also checks it never offers the card it runs from.
 
 Built (2026-10-30), as above, in one `net10.0` program: `Platform` says where files go and whose they are (under
@@ -215,15 +221,15 @@ sudo, the settings, SSH keys and known_hosts stay the user's, in their home and 
 readers come from `lsblk` (a USB disk with removable media, or an SD card on the MMC bus, and nothing on it mounted
 except where removable media go, which leaves out the disk the system runs from); the card is written with O_DIRECT
 and O_SYNC, flushed and its cache dropped (BLKFLSBUF) before the check reads it back, then the partition table is
-re-read (BLKRRPART); applpi mounts the boot partition itself in a temporary folder (no desktop needed), or uses it
-where a desktop mounted it; `devices.json` is in `~/.config/applpi`, readable only by its user, with secrets marked
+re-read (BLKRRPART); juggle mounts the boot partition itself in a temporary folder (no desktop needed), or uses it
+where a desktop mounted it; `devices.json` is in `~/.config/juggle`, readable only by its user, with secrets marked
 `plain:`. Linux builds are self-contained (`dotnet publish -r linux-x64` or `linux-arm`, about 75 MB) and without
 ICU (invariant globalization), so time zones are checked against the system's own time zone data.
 Checked (2026-10-30) on WSL2's Debian 13 with a USB card reader: a faulty card (writes accepted but not kept) was
-refused by the check; a good one was flashed with v0.6.0 downloaded from GitHub, set up (`applpi setup`, with sudo to
-mount it), booted in the Pi 2 with all checks passing, then updated from Debian (`applpi update`) to a newer build,
+refused by the check; a good one was flashed with v0.6.0 downloaded from GitHub, set up (`juggle setup`, with sudo to
+mount it), booted in the Pi 2 with all checks passing, then updated from Debian (`juggle update`) to a newer build,
 kept on its trial boot. Under WSL, Debian can't resolve `.local` names (WSL's network is behind Windows'): an
-`/etc/hosts` line does. Still to check: `applpi` on a Pi, with a card reader in its USB port. macOS
+`/etc/hosts` line does. Still to check: `juggle` on a Pi, with a card reader in its USB port. macOS
 would be about as much again (`diskutil`, `/dev/rdiskN`, the Keychain). Best done before v1 and before the flash
 app (step 5), so the app is chosen once, and alongside published images, so a release can be downloaded and
 flashed on either without Docker.
@@ -235,19 +241,19 @@ Start with one test Pi (a plain Pi 2 with the official Wi-Fi dongle). The Pis wi
 ### 1. First image
 
 pi-gen configuration that builds the stripped, read-only image locally in Docker, with first boot laying out the
-card and reading `applpi.json`. Booting from slot A only for now (the firmware's slot directories come in step 4).
-Until the flash tool exists, the image is written with Raspberry Pi Imager (no customisation) and `applpi.json` is
+card and reading `juggle.json`. Booting from slot A only for now (the firmware's slot directories come in step 4).
+Until the flash tool exists, the image is written with Raspberry Pi Imager (no customisation) and `juggle.json` is
 copied onto the boot partition by hand. The GitHub Actions workflow comes once the build is settled.
 
 ### 2. Flash tool
 
-`applpi` on the command line: card readers, writing the image, `applpi.json` from the device settings in
-`%APPDATA%\ApplPi`. Done when the test Pi joins Wi-Fi on first boot and SSH works with the key.
+`juggle` on the command line: card readers, writing the image, `juggle.json` from the device settings in
+`%APPDATA%\Juggle`. Done when the test Pi joins Wi-Fi on first boot and SSH works with the key.
 
-- Done: `applpi setup [name]` asks for the Pi's name, Wi-Fi and time zone (defaults from the last Pi), makes an SSH
-  key if there isn't one, and writes `applpi.json` to an ApplPi card's boot partition, checked against the same rules
-  as the Pi. Settings are kept in `%APPDATA%\ApplPi\devices.json`, Wi-Fi passwords encrypted with DPAPI.
-- Done: `applpi flash [image]` writes the image (default: the newest in `deploy\`) and reads it back to check it,
+- Done: `juggle setup [name]` asks for the Pi's name, Wi-Fi and time zone (defaults from the last Pi), makes an SSH
+  key if there isn't one, and writes `juggle.json` to a Juggle card's boot partition, checked against the same rules
+  as the Pi. Settings are kept in `%APPDATA%\Juggle\devices.json`, Wi-Fi passwords encrypted with DPAPI.
+- Done: `juggle flash [image]` writes the image (default: the newest in `deploy\`) and reads it back to check it,
   then carries on as `setup`. It only offers disks on the USB or SD bus that Windows calls removable media and that
   aren't the system or boot disk, shows their name, size and drive letters, and needs ERASE typed to write. It asks
   for administrator rights (UAC) and continues in a new window. The partition table is written last, so Windows
@@ -255,11 +261,11 @@ copied onto the boot partition by hand. The GitHub Actions workflow comes once t
 
 ### 3. Apps
 
-The `applpi-app` service, the app manifest and the app's place on the data partition, proved with a "hello" app in
+The `juggle-app` service, the app manifest and the app's place on the data partition, proved with a "hello" app in
 its own repo: a Microdot page in the Pico style with `/api/info`, and a `deploy.ps1`. `checks.sh` checks the app
 runs and answers on port 80, so `test-pi.ps1` covers it. Released as v0.3.0.
 
-- Done (v0.3.0): one app per Pi, as above, with [ApplPi Hello](https://github.com/EarthstormSoftware/applpi-hello)
+- Done (v0.3.0): one app per Pi, as above, with [Juggle Hello](https://github.com/EarthstormSoftware/juggle-hello)
   as the example. Checked on the Pi 2: deploying, a crash (restarted), a bad manifest (refused, the old app kept), an
   app that won't start (reported with its output), removing, and two OS updates with the app running (kept, its
   settings too, the trial boot waiting for it). An OS update the app can't start under
@@ -270,7 +276,7 @@ runs and answers on port 80, so `test-pi.ps1` covers it. Released as v0.3.0.
 The A/B slots, the update command and the automatic switch back. Check it by updating to a deliberately broken
 image.
 
-- Done (v0.2.0): the slots, `applpi update` and `os-update` (writing only the root's blocks that hold data, checked
+- Done (v0.2.0): the slots, `juggle update` and `os-update` (writing only the root's blocks that hold data, checked
   by reading back and `e2fsck`), the Pi's own check of a trial boot, the watchdog and `panic=10`, and both login
   screens showing the slot and the last update. Checked on the Pi 2: updates both ways, and an update to an image
   with a failing service (`image\test\broken-image.ps1`) going back by itself, with the reason shown.
@@ -285,7 +291,7 @@ image.
 
 ### 5. Flash app
 
-The flashing app, in [Avalonia](https://avaloniaui.net) (.NET, on Windows, Linux and macOS), as `applpi` goes to
+The flashing app, in [Avalonia](https://avaloniaui.net) (.NET, on Windows, Linux and macOS), as `juggle` goes to
 Linux too (decided 2026-10-29, see Tools on Windows and Linux).
 
 ### 6. Check the test Pi
@@ -311,12 +317,12 @@ What's listening, memory and CPU at rest, boot time, and pulling the power while
 
 ### 7. Setup mode (before v1)
 
-A second way to set a Pi up, as the Picos are (decided 2026-10-27). `applpi flash` stays as the quick way: a card
-with `applpi.json` skips setup mode.
+A second way to set a Pi up, as the Picos are (decided 2026-10-27). `juggle flash` stays as the quick way: a card
+with `juggle.json` skips setup mode.
 
-- A card with no settings (written by any imager, from a published image) starts an `ApplPi-SETUP` hotspot for 10
+- A card with no settings (written by any imager, from a published image) starts an `Juggle-SETUP` hotspot for 10
   minutes, as the Picos do: join it and open the setup page. It asks for the name, Wi-Fi, time zone and SSH key,
-  and the settings go on the data partition as `applpi.json`'s do.
+  and the settings go on the data partition as `juggle.json`'s do.
 - The page is HTTPS, with a certificate the Pi makes on its first boot, so nothing on it can be read by someone
   listening to the open hotspot (the Wi-Fi password, above all). The browser can't check the certificate (no
   public authority issues them for `.local` names), so it warns once; the certificate's fingerprint is shown on
@@ -336,27 +342,27 @@ with `applpi.json` skips setup mode.
   hotspot. `iw list` gives AP mode, and AP alongside a normal connection on one channel. With `wpa_supplicant`
   (`mode=2`, open) and a `systemd-networkd` DHCP server on 192.168.4.1/24, all already in the image, another Pi
   saw it (-56 dBm), joined, got an address in 4 s and loaded the page on port 80. The normal Wi-Fi came back after.
-- With this, the Linux side of `applpi` may only need `update`, which is plain SSH (see Tools on Windows and Linux).
+- With this, the Linux side of `juggle` may only need `update`, which is plain SSH (see Tools on Windows and Linux).
 - Built (2026-10-27), with no new packages:
   - `apply-settings` starts setup mode when there are no settings, or once when `/data/settings/setup-next` asks.
     It writes the hotspot's `wpa_supplicant` configuration and `/run/systemd/network/05-setup.network` (which comes
     before `20-wireless.network`), so nothing extra is enabled the rest of the time. The app doesn't start in setup
     mode, as the page has port 80.
-  - `/usr/lib/applpi/setup` (`applpi-setup.service`, Python's standard library) serves the page over HTTPS on 443,
+  - `/usr/lib/juggle/setup` (`juggle-setup.service`, Python's standard library) serves the page over HTTPS on 443,
     with the certificate made by `openssl` and kept in `/data/setup`. Port 80 says where the page is, with the
     fingerprint. On the hotspot, a captive DNS sends every name to the Pi, so phones show their sign-in page. The
     fingerprint is on the console, and the ACT LED blinks. The settings are checked by `apply-settings`' own rules.
   - Without settings, setup mode stays on until the Pi is set up (restarting it couldn't help), and the page is on
-    Ethernet too, at `https://applpi-<last 4 digits of the serial>.local/`. When Wi-Fi didn't connect, it's on the
+    Ethernet too, at `https://juggle-<last 4 digits of the serial>.local/`. When Wi-Fi didn't connect, it's on the
     hotspot only, for 10 minutes (more while the page is in use), keeping the name, keys and an empty password's
     Wi-Fi key, then the Pi restarts on its settings.
-  - `wifi-check` (`applpi-wifi-check.service`): with Wi-Fi settings but no routable network a while after
+  - `wifi-check` (`juggle-wifi-check.service`): with Wi-Fi settings but no routable network a while after
     starting, it writes `setup-next` and restarts. Not on a trial boot, which goes back instead.
   - The Wi-Fi fallback is a setting (`wifi_fallback`: `enabled`, `after_minutes` 1-1440, `for_minutes` 5-120;
     defaults on, 360 and 10: up to a day, as a router can be slow back after a power cut, asked for on 2026-10-28),
     since restarting by itself is a change the system makes on its own. Wi-Fi settings the Pi hasn't connected with
     yet (a hash in `/data/settings/wifi-proven`, written by `wifi-check` once Wi-Fi connects) get 5 minutes, even with
-    the fallback off, so a mistyped password doesn't wait hours. The setting is in `applpi.json`, on
+    the fallback off, so a mistyped password doesn't wait hours. The setting is in `juggle.json`, on
     the setup page, and from the app (`app-request wifi-fallback on|off <after> <for>`), so App Base can offer it on
     the app's page. The Picos should get the same three settings from App Base.
 - Checked on the Pi 2 (2026-10-27): a normal boot (all checks; the Wi-Fi check stops once Wi-Fi is up), the Wi-Fi
@@ -371,7 +377,7 @@ with `applpi.json` skips setup mode.
   (as the Wi-Fi fallback does, but with the page on Ethernet too, for wired Pis), and `app-request factory-reset`
   forgets them (name, Wi-Fi, keys, time zone) and restarts as a new Pi. The host key stays, and the app and its
   state (resetting those is the app's own reset). App Base offers them on the app's page (rename, the Wi-Fi fallback,
-  factory reset), shown only on an OS that has them. Checked on the Pi 2 with ApplPi Unicorn (2026-10-27): the
+  factory reset), shown only on an OS that has them. Checked on the Pi 2 with Juggle Unicorn (2026-10-27): the
   fallback's settings read, saved and refused out of range, and setup mode asked for from its page (the page saying
   so, on the hotspot, then back by itself). The factory reset was checked in a container and by the QEMU test's Pi
   without settings, not on a Pi (setting it up again needs the Wi-Fi password).
@@ -381,7 +387,7 @@ with `applpi.json` skips setup mode.
   the password on stdin, is used from the next start on trial. If it doesn't connect within 5 minutes, `wifi-check`
   puts the network before back (`wifi-previous.json`, `wifi-trial`), so a mistyped password can't strand the Pi.
   `app-request networks` lists the networks in range for the app's page. `wifi-check` now waits a minute for an IPv4
-  address before taking Wi-Fi settings as proven. App Base offers both on the app's page (ApplPi Unicorn's Device tab).
+  address before taking Wi-Fi settings as proven. App Base offers both on the app's page (Juggle Unicorn's Device tab).
   Checked on the Pi 2 (2026-10-28): a wrong password tried and the network before back in about 6 minutes. Checked
   again with the release build (2026-10-29), updated over SSH on the Pi 2 and on a second Pi: the wrong password
   put back in about 6 minutes, the right one kept, the scan, and the app's page changing the network. Released in
@@ -390,12 +396,12 @@ with `applpi.json` skips setup mode.
 ## Then
 
 - **HTTPS for apps** (after v1, optional): the app's page over HTTPS, so its web password (HTTP Basic auth) isn't
-  sent in the clear. `applpi` would be a small certificate authority of your own: made once on the PC, it signs each
+  sent in the clear. `juggle` would be a small certificate authority of your own: made once on the PC, it signs each
   Pi's certificate, and each PC and phone trusts it once (easy on Windows, fiddly on phones); tools such as
   `deploy.ps1 -WiFi` and Home Assistant would trust it too. Plain HTTP with the web password stays the default, as
   on the Picos, which can't serve HTTPS (a Pico W struggles even to make HTTPS requests).
 
-- **Unicorn HAT Pi** (started: ApplPi Unicorn, on App Base; both stay private until close to v1): an 8×8 light,
+- **Unicorn HAT Pi** (started: Juggle Unicorn, on App Base; both stay private until close to v1): an 8×8 light,
   controlled like PlasmaStick, with the modes of the old `uhcontrol.py` and later status and alerts. `rpi_ws281x` is
   in the image, `"pwm": true` frees the PWM hardware from the audio, and the LEDs need a brightness cap: 64 at full
   white is about 3.5 A, more than a Pi 2 can supply.

@@ -1,0 +1,29 @@
+#!/bin/bash
+# The SSH login screen (/etc/update-motd.d/00-juggle): cleared, then the icon beside the same information as the
+# console's (/etc/issue)
+. /etc/juggle-release
+ipv4=$(ip -o -4 addr show scope global | awk '{ split($4, a, "/"); print a[1]; exit }')
+ipv6=$(ip -o -6 addr show scope global | awk '{ split($4, a, "/"); print a[1]; exit }')
+model=$(/usr/lib/juggle/slot model)
+info=(
+	""
+	$'\e[32mJuggle OS\e[0m '"${VERSION}${model:+ ($model)}, build ${BUILD_STAMP} UTC"
+	""
+	"Name          $(hostname).local"
+	"IPv4          ${ipv4:-none}"
+	"IPv6          ${ipv6:-none}"
+)
+# The app, and the OS slot
+mapfile -t -O "${#info[@]}" info < <(/usr/lib/juggle/slot app)
+info+=("OS slot       $(/usr/lib/juggle/slot)")
+# The last OS update, if there's been one: a line or two, labelled and coloured
+mapfile -t -O "${#info[@]}" info < <(/usr/lib/juggle/slot update)
+mapfile -t logo < /usr/share/juggle/logo.ansi
+blank=$(printf '%*s' "$(printf '%s' "${logo[0]}" | sed 's/\x1b\[[0-9;]*m//g' | wc -m)" '')
+
+printf '\e[H\e[2J\n'
+lines=$(( ${#logo[@]} > ${#info[@]} ? ${#logo[@]} : ${#info[@]} ))
+for (( i = 0; i < lines; i++ )); do
+	printf '%s   %s\n' "${logo[$i]:-$blank}" "${info[$i]:-}"
+done
+echo

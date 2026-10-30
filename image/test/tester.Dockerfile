@@ -1,4 +1,4 @@
-# applpi-os-tester: unpacks the image and boots it in QEMU (qemu-virt.sh unpack, boot and setup; curl and openssl
+# juggle-os-tester: unpacks the image and boots it in QEMU (qemu-virt.sh unpack, boot and setup; curl and openssl
 # are for the setup page)
 FROM debian:trixie
 

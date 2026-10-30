@@ -1,6 +1,6 @@
 # Per-device settings and keys (use the *.example.json files as templates)
 devices.json
-applpi.json
+juggle.json
 
 # Built and downloaded images
 *.img

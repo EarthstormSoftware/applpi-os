@@ -1,16 +1,16 @@
-# pi-gen settings for ApplPi OS. Nothing per Pi goes here: the flash tool adds that in applpi.json.
-IMG_NAME=applpi-os
-# Image files are named by version (from build.ps1): applpi-os-v0.1.0.img.xz
-IMG_FILENAME="applpi-os-${APPLPI_VERSION:-dev}"
-ARCHIVE_FILENAME="applpi-os-${APPLPI_VERSION:-dev}"
+# pi-gen settings for Juggle OS. Nothing per Pi goes here: the flash tool adds that in juggle.json.
+IMG_NAME=juggle-os
+# Image files are named by version (from build.ps1): juggle-os-v0.1.0.img.xz
+IMG_FILENAME="juggle-os-${JUGGLE_VERSION:-dev}"
+ARCHIVE_FILENAME="juggle-os-${JUGGLE_VERSION:-dev}"
 RELEASE=trixie
-STAGE_LIST="/pi-gen/stage0 /pi-gen/stage1 /pi-gen/stage2-applpi"
+STAGE_LIST="/pi-gen/stage0 /pi-gen/stage1 /pi-gen/stage2-juggle"
 DEPLOY_COMPRESSION=xz
 COMPRESSION_LEVEL=6
 
 LOCALE_DEFAULT=en_GB.UTF-8
-TARGET_HOSTNAME=applpi
-FIRST_USER_NAME=applpi
+TARGET_HOSTNAME=juggle
+FIRST_USER_NAME=juggle
 
 # Size of each root slot (A and B). Fixed, so root B (made on first boot) matches root A and an update always fits.
 # With the 384 MiB boot partition, a 4 GB card (about 3.7 GiB) keeps about 0.8 GiB for data.

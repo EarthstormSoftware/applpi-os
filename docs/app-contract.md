@@ -1,7 +1,7 @@
 # The app contract
 
-What an ApplPi app can rely on: how it's installed and run, what it may read and write, the hardware it may use, and
-what it may ask the OS for. From v1.0 this is what ApplPi OS's version number protects. Everything not written here
+What a Juggle app can rely on: how it's installed and run, what it may read and write, the hardware it may use, and
+what it may ask the OS for. From v1.0 this is what Juggle OS's version number protects. Everything not written here
 (the card layout, the A/B slots, `os-update`, the setup page, the login screens) may change in any release.
 
 **Status: draft for v1.0.** The changes it needed are made for the next release (see Before v1); one switch is left
@@ -9,7 +9,7 @@ for v1.0 itself.
 
 ## Versions
 
-ApplPi OS is versioned `MAJOR.MINOR.PATCH`, and the contract goes with it:
+Juggle OS is versioned `MAJOR.MINOR.PATCH`, and the contract goes with it:
 
 - **Major**: something an app relies on changes or goes away (a request, a path, a manifest setting, the Python
   major version, a library). Apps may need changing.
@@ -17,10 +17,10 @@ ApplPi OS is versioned `MAJOR.MINOR.PATCH`, and the contract goes with it:
   library, a new group for the app user. An app made for 1.0 runs unchanged on every 1.x.
 - **Patch**: fixes, with no change an app can see except the fix.
 
-An app says which contract it needs in its manifest (`"applpi": "1.2"`: ApplPi OS 1.2 or a later 1.x), and is told
-the one the OS gives in `APPLPI` (`"1.2"`), the version of the last release that added to the contract: a release
+An app says which contract it needs in its manifest (`"juggle": "1.2"`: Juggle OS 1.2 or a later 1.x), and is told
+the one the OS gives in `JUGGLE` (`"1.2"`), the version of the last release that added to the contract: a release
 that adds nothing for apps leaves it as it was. An app that uses something added in 1.2 says 1.2, so an older OS
-refuses it with a clear message ("needs ApplPi 1.2 or later") instead of starting it and failing later.
+refuses it with a clear message ("needs Juggle 1.2 or later") instead of starting it and failing later.
 
 Rules for both sides, so additions never break anything:
 - The OS never removes a request, a manifest setting or an output field within a major version, and never changes
@@ -35,12 +35,12 @@ Rules for both sides, so additions never break anything:
 In the app's folder, beside `main.py`:
 
 ```json
-{"applpi": "1.0", "name": "hello", "version": "1.0.0", "root": false, "pwm": false}
+{"juggle": "1.0", "name": "hello", "version": "1.0.0", "root": false, "pwm": false}
 ```
 
 | Setting | Required | Meaning |
 |---|---|---|
-| `applpi` | yes (from v1.0) | The contract the app needs, `"MAJOR.MINOR"`. Refused if the OS's major differs, or its minor is lower. |
+| `juggle` | yes (from v1.0) | The contract the app needs, `"MAJOR.MINOR"`. Refused if the OS's major differs, or its minor is lower. |
 | `name` | yes | Lowercase letters, digits and hyphens, 1 to 32, not starting or ending with a hyphen. Installing an app with another name starts it with empty state. |
 | `version` | yes | Letters, digits and `.` `_` `+` `-`, up to 32. Shown on the login screens and to the app's own update. |
 | `root` | no (false) | Run as root, for libraries that need `/dev/mem` (`rpi_ws281x`). Otherwise the app runs as the `app` user. |
@@ -64,13 +64,13 @@ partition has the rest of the card, less the OS's own settings.
 
 ## How the app runs
 
-- **Start**: `python3 main.py` in `/data/app`, by the `applpi-app` service, once the data partition is mounted and
+- **Start**: `python3 main.py` in `/data/app`, by the `juggle-app` service, once the data partition is mounted and
   the settings applied. Not in setup mode (the setup page has port 80).
 - **User**: `app` (uid and gid 800), in the groups `gpio`, `i2c`, `spi`, `video`, `input` and `dialout`, and allowed
   to listen on ports below 1024. `root: true` runs it as root instead.
 - **Environment**: `PYTHONPATH=/data/app/lib`, `PYTHONUNBUFFERED=1`, `PYTHONDONTWRITEBYTECODE=1`,
-  `APPLPI_STATE=/data/app-state`, `HOME=/data/app-state`, and `APPLPI`, the contract the OS gives (`"1.0"`).
-- **Its web page** is on port 80, at `http://<name>.local`, by convention (`applpi` and App Base expect it there).
+  `JUGGLE_STATE=/data/app-state`, `HOME=/data/app-state`, and `JUGGLE`, the contract the OS gives (`"1.0"`).
+- **Its web page** is on port 80, at `http://<name>.local`, by convention (`juggle` and App Base expect it there).
   Nothing else on the Pi listens on 80. The app may listen on other ports too, on IPv4 and IPv6.
 - **Restarts**: whenever it stops, after 5 seconds, however often. Exit status 78 means "don't restart me" (a
   configuration the app can't run with): the service stays stopped until the next start or install.
@@ -98,7 +98,7 @@ input devices (touch, keyboards: `/dev/input/*`). I2C and SPI are off unless swi
 
 ## Requests: `app-request`
 
-The app may run `sudo -n /usr/lib/applpi/app-request <request> [arguments]` and nothing else as root. Each request
+The app may run `sudo -n /usr/lib/juggle/app-request <request> [arguments]` and nothing else as root. Each request
 is checked by the OS.
 
 - Exit status 0: done, with any answer on standard output (JSON where it says so).
@@ -120,37 +120,37 @@ is checked by the OS.
 
 ## Installing and removing (for deploy tools)
 
-Over SSH as the admin user `applpi`, with a `.tar` of the app's folder:
+Over SSH as the admin user `juggle`, with a `.tar` of the app's folder:
 
-- `sudo /usr/lib/applpi/app install <file.tar>`: replaces the app, starts it, and fails (exit status 1, with the
+- `sudo /usr/lib/juggle/app install <file.tar>`: replaces the app, starts it, and fails (exit status 1, with the
   app's output) if it doesn't keep running for 10 seconds.
-- `sudo /usr/lib/applpi/app remove`: stops the app and removes it and its state.
+- `sudo /usr/lib/juggle/app remove`: stops the app and removes it and its state.
 
 ## Not in the contract
 
-These are the OS's own, and may change in any release: the partitions and slots, `/data/settings`, `applpi.json`
-(that's the `applpi` tool's, released with the OS), `os-update`, the setup page, the login screens, the boot
+These are the OS's own, and may change in any release: the partitions and slots, `/data/settings`, `juggle.json`
+(that's the `juggle` tool's, released with the OS), `os-update`, the setup page, the login screens, the boot
 splash, which services run, the packages beyond Python and the libraries above, and the admin user's sudo.
 
 ## Before v1
 
 Changes made before the contract is frozen, because they can't be added later without breaking something:
 
-1. **`applpi` in `app.json`**, checked as above (the `app` command's `check_applpi`). Without it, an OS can't tell
+1. **`juggle` in `app.json`**, checked as above (the `app` command's `check_juggle`). Without it, an OS can't tell
    an app made for a later 1.x from one it can run, and the first app to use something new would fail at runtime
    instead of being refused. The check comes before the one for unknown settings, so an app made for a later 1.x
    gets "update the OS", not "unknown setting".
-2. **`APPLPI` in the app's environment**, so an app checks a version to know what it can ask for. App Base used to
+2. **`JUGGLE` in the app's environment**, so an app checks a version to know what it can ask for. App Base used to
    read `app-request`'s source for a request's name, which made the text of a script part of the contract.
-3. **App Base uses `APPLPI`** for `os_requests`, `os_setup` and `os_wifi`, falling back to the old check on an OS
+3. **App Base uses `JUGGLE`** for `os_requests`, `os_setup` and `os_wifi`, falling back to the old check on an OS
    from before it. App Base also runs on Picos, with about 190 KB of heap and 640 KB of flash on the smallest, so
    the check is in `base/pi.py`, which a Pico's deploy leaves out: shared code doesn't change.
 4. **Exit status 2 for an unknown request**, kept as it was, written down (above) so App Base can tell "not on this
    OS" from "refused".
 
-Left for v1.0 itself: `APPLPI_REQUIRED` in the `app` command becomes true, so an `app.json` without `applpi` is
+Left for v1.0 itself: `JUGGLE_REQUIRED` in the `app` command becomes true, so an `app.json` without `juggle` is
 refused. Until then it's taken, so apps from before it keep running while they gain it (an OS before this one
-refuses `applpi` as a setting it doesn't know, so an app adds it only once its Pis have this OS).
+refuses `juggle` as a setting it doesn't know, so an app adds it only once its Pis have this OS).
 
 ## Later (minor releases)
 

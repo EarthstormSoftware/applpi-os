@@ -1,4 +1,4 @@
-# applpi-os-test-kernel (ARM): Debian's generic ARM kernel and what's needed to make its initramfs with the image's
+# juggle-os-test-kernel (ARM): Debian's generic ARM kernel and what's needed to make its initramfs with the image's
 # overlayroot (qemu-virt.sh kernel). overlayroot's initramfs hook copies cryptsetup and mke2fs in, and its script
 # needs busybox, as on the Pi.
 FROM debian:trixie

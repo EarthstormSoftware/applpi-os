@@ -1,6 +1,6 @@
-# Builds the ApplPi OS image in the same container as image\build.ps1 (a full build, as for any release).
+# Builds the Juggle OS image in the same container as image\build.ps1 (a full build, as for any release).
 # A tag (vX.Y.Z) makes a draft release with the image, its .bmap and SHA256SUMS, for its notes to be written and then
-# published; applpi flash and update download published releases. Run by hand (on any branch), the image is kept as a
+# published; juggle flash and update download published releases. Run by hand (on any branch), the image is kept as a
 # test build for a few days instead.
 name: Image
 
@@ -25,11 +25,11 @@ jobs:
         run: |
           version=$(git describe --tags --match 'v[0-9]*' --always --dirty)
           echo "VERSION=$version" >> "$GITHUB_ENV"
-          docker build --platform linux/386 --tag applpi-os-builder image
+          docker build --platform linux/386 --tag juggle-os-builder image
           docker run --name build --privileged \
-            --env "APPLPI_VERSION=$version" --env "APPLPI_COMMIT=$(git rev-parse --short HEAD)" \
-            --env "APPLPI_BUILD_STAMP=$(date -u +%Y%m%d-%H%M)" --env APPLPI_QUICK=0 \
-            applpi-os-builder ./build-in-container.sh
+            --env "JUGGLE_VERSION=$version" --env "JUGGLE_COMMIT=$(git rev-parse --short HEAD)" \
+            --env "JUGGLE_BUILD_STAMP=$(date -u +%Y%m%d-%H%M)" --env JUGGLE_QUICK=0 \
+            juggle-os-builder ./build-in-container.sh
           mkdir deploy
           docker cp build:/pi-gen/deploy/. deploy/
           ls -l deploy
@@ -37,18 +37,18 @@ jobs:
       - name: Checksums
         working-directory: deploy
         run: |
-          test -f "applpi-os-$VERSION.img.xz" && test -f "applpi-os-$VERSION.bmap"
-          sha256sum "applpi-os-$VERSION.img.xz" "applpi-os-$VERSION.bmap" > SHA256SUMS
+          test -f "juggle-os-$VERSION.img.xz" && test -f "juggle-os-$VERSION.bmap"
+          sha256sum "juggle-os-$VERSION.img.xz" "juggle-os-$VERSION.bmap" > SHA256SUMS
           cat SHA256SUMS
 
       - name: Keep a test build
         if: github.ref_type != 'tag'
         uses: actions/upload-artifact@v4
         with:
-          name: applpi-os-${{ env.VERSION }}
+          name: juggle-os-${{ env.VERSION }}
           path: |
-            deploy/applpi-os-*.img.xz
-            deploy/applpi-os-*.bmap
+            deploy/juggle-os-*.img.xz
+            deploy/juggle-os-*.bmap
             deploy/SHA256SUMS
             deploy/*.info
           retention-days: 7
@@ -58,6 +58,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$VERSION" --draft --verify-tag --title "ApplPi OS $VERSION" \
-            --notes "Images for Raspberry Pis (32-bit, armhf). Write one with \`applpi flash $VERSION\`, which checks it against SHA256SUMS." \
-            "deploy/applpi-os-$VERSION.img.xz" "deploy/applpi-os-$VERSION.bmap" deploy/SHA256SUMS
+          gh release create "$VERSION" --draft --verify-tag --title "Juggle OS $VERSION" \
+            --notes "Images for Raspberry Pis (32-bit, armhf). Write one with \`juggle flash $VERSION\`, which checks it against SHA256SUMS." \
+            "deploy/juggle-os-$VERSION.img.xz" "deploy/juggle-os-$VERSION.bmap" deploy/SHA256SUMS

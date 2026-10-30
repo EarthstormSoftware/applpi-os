@@ -1,0 +1,18 @@
+[Unit]
+Description=Juggle device settings
+DefaultDependencies=no
+Requires=juggle-data.service
+After=local-fs.target juggle-data.service
+RequiresMountsFor=/boot/firmware
+Wants=network-pre.target
+Before=network-pre.target systemd-networkd.service wpa_supplicant@wlan0.service avahi-daemon.service ssh.service
+Before=sysinit.target shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/juggle/apply-settings
+
+[Install]
+WantedBy=sysinit.target

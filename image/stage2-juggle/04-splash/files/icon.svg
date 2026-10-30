@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="150" viewBox="0 0 200 150">
+  <!-- The Juggle OS icon for the console, drawn once for each CPU core: the whole figure of eight without trails (they
+       blur away this small), on the console's black background, which the balls' outlines match. -->
+  <path d="M100 75 C130 30 175 30 175 75 C175 120 130 120 100 75 C70 30 25 30 25 75 C25 120 70 120 100 75 Z" fill="none" stroke="#F4F2EE" stroke-width="11" stroke-linecap="round"/>
+  <circle cx="51" cy="41" r="17" fill="#3DDC84" stroke="#000000" stroke-width="5"/>
+  <circle cx="100" cy="75" r="17" fill="#FFB020" stroke="#000000" stroke-width="5"/>
+  <circle cx="149" cy="109" r="17" fill="#4DA3FF" stroke="#000000" stroke-width="5"/>
+</svg>

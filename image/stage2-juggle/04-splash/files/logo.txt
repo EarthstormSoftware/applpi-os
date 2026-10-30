@@ -1,0 +1,22 @@
+# The Juggle OS icon for the SSH login screen, drawn as pixel art: shrinking the splash logo this small only blurs it.
+# ansi-logo.awk turns it into coloured half blocks, two rows per line. One character per colour; "." is the
+# terminal's own background. The line is mid grey, to show on a dark or a light terminal.
+colour W a3a8ae
+colour G 3ddc84
+colour Y ffb020
+colour B 4da3ff
+...GGGG..................
+..GGGGGG...........WW....
+..GGGGGG........WWWWWWW..
+..GGGGGG.W.....WWWW..WWW.
+.W.GGGG.WW.....WW.....WW.
+WW.........YYY.........WW
+WW........YYYYY........WW
+WW........YYYYY........WW
+WW........YYYYY........WW
+WW.........YYY.........WW
+.WW.....WW.....WW.BBBB.W.
+.WWW..WWWW.....W.BBBBBB..
+..WWWWWWW........BBBBBB..
+....WW...........BBBBBB..
+..................BBBB...

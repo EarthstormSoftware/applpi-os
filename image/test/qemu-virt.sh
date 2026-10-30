@@ -1,13 +1,13 @@
 #!/bin/bash
-# Test boots of an ApplPi OS image on QEMU's generic ARM machine ("virt"), run by test-qemu.ps1 in three containers
+# Test boots of a Juggle OS image on QEMU's generic ARM machine ("virt"), run by test-qemu.ps1 in three containers
 # sharing /work:
-#   unpack <image.img.xz>  (applpi-os-tester, privileged)  the image as a 4 GB card, and overlayroot's initramfs files
-#   kernel                 (applpi-os-test-kernel, ARM)     Debian's generic ARM kernel and an initramfs with overlayroot
+#   unpack <image.img.xz>  (juggle-os-tester, privileged)  the image as a 4 GB card, and overlayroot's initramfs files
+#   kernel                 (juggle-os-test-kernel, ARM)     Debian's generic ARM kernel and an initramfs with overlayroot
 #   boot full|quick <image.img.xz>
-#                          (applpi-os-tester, privileged)  boots the card and checks it over SSH; results in /work/out.
+#                          (juggle-os-tester, privileged)  boots the card and checks it over SSH; results in /work/out.
 #                                                          Full: then updates it to the same image (os-update write)
 #                                                          and boots slot B as tryboot would.
-#   setup <image.img.xz>   (applpi-os-tester, privileged)  boots the card with no settings, sets it up from the setup
+#   setup <image.img.xz>   (juggle-os-tester, privileged)  boots the card with no settings, sets it up from the setup
 #                                                          page, then boots it on those settings and checks it.
 # QEMU's Pi 2 model can't read the SD card with the Pi kernel, so this tests everything of ours (first boot, settings,
 # SSH, read-only root, writing an update) but not the Pi's kernel, firmware (os_prefix, tryboot) or Wi-Fi.
@@ -51,17 +51,17 @@ boot() {
 
 	add_modules 2
 
-	# Throwaway keys and test settings (no Wi-Fi in QEMU). The Pi's host key is sent with them, as applpi does, and
+	# Throwaway keys and test settings (no Wi-Fi in QEMU). The Pi's host key is sent with them, as juggle does, and
 	# ssh trusts only that key: a Pi that made its own wouldn't be reachable.
 	local boot_img="$img@@$(offset 1)"
 	ssh-keygen -q -t ed25519 -N "" -f /tmp/key
 	ssh-keygen -q -t ed25519 -N "" -C "" -f /tmp/hostkey
 	echo "[localhost]:2222 $(cut -d' ' -f1,2 /tmp/hostkey.pub)" > /tmp/known_hosts
-	cat > /tmp/applpi.json <<-EOF
-		{ "hostname": "applpi-qemu", "timezone": "Europe/London", "ssh_keys": ["$(cat /tmp/key.pub)"],
+	cat > /tmp/juggle.json <<-EOF
+		{ "hostname": "juggle-qemu", "timezone": "Europe/London", "ssh_keys": ["$(cat /tmp/key.pub)"],
 		  "host_key": "$(awk '{printf "%s\\n", $0}' /tmp/hostkey)" }
 	EOF
-	mcopy -o -i "$boot_img" /tmp/applpi.json ::applpi.json
+	mcopy -o -i "$boot_img" /tmp/juggle.json ::juggle.json
 	slot_cmdline A
 
 	# The file written to /etc on the first boot must be gone on the second (the root's changes are in RAM)
@@ -77,12 +77,12 @@ boot() {
 		# As tryboot would: slot B's cmdline.txt, whose root is partition 3
 		add_modules 3
 		slot_cmdline B
-		run_boot 2 && checks 2 && ssh_pi 'ls /etc/test-overlay; sudo -n /usr/lib/applpi/os-update commit; sudo -n systemctl poweroff' \
+		run_boot 2 && checks 2 && ssh_pi 'ls /etc/test-overlay; sudo -n /usr/lib/juggle/os-update commit; sudo -n systemctl poweroff' \
 			>> "$out/checks-2.log" 2>&1 || true
 		stop_qemu
 	fi
 	echo "== Boot partition after" | tee -a "$out/summary.log"
-	mdir -i "$boot_img" :: | grep -iE "applpi(\.json|-error)" | tee -a "$out/summary.log" || echo "no settings or error file" | tee -a "$out/summary.log"
+	mdir -i "$boot_img" :: | grep -iE "juggle(\.json|-error)" | tee -a "$out/summary.log" || echo "no settings or error file" | tee -a "$out/summary.log"
 }
 
 # A card with no settings, as written by any imager: setup mode, set up from its page (over QEMU's network, as it
@@ -125,12 +125,12 @@ setup() {
 	# Set up as someone would: no Wi-Fi (QEMU has none), their SSH key, and the host key the page then gives
 	local status
 	status=$(curl -sk -m 60 -o /dev/null -w '%{http_code}' https://localhost:8443/save \
-		--data hostname=applpi-qemu --data timezone=Europe/London --data country=GB --data ssid= --data keys=paste \
+		--data hostname=juggle-qemu --data timezone=Europe/London --data country=GB --data ssid= --data keys=paste \
 		--data-urlencode "public_key=$(cat /tmp/key.pub)" \
 		--data fallback_enabled=on --data fallback_after=5 --data fallback_for=10 || true)
 	curl -sk -m 20 -o "$out/setup-done.html" https://localhost:8443/ || true
 	local line
-	line=$(grep -o 'applpi-qemu\.local ssh-ed25519 [A-Za-z0-9+/=]*' "$out/setup-done.html" || true)
+	line=$(grep -o 'juggle-qemu\.local ssh-ed25519 [A-Za-z0-9+/=]*' "$out/setup-done.html" || true)
 	if [ "$status" = 303 ] && [ -n "$line" ]; then
 		echo "[localhost]:2222 ${line#* }" > /tmp/known_hosts
 		echo "Saved, and the page gave the host key" | tee -a "$out/summary.log"
@@ -163,15 +163,15 @@ slot_cmdline() {
 	echo "Kernel command line (slot $1): $cmdline"
 }
 
-# An OS update to the same image, as applpi update sends it
+# An OS update to the same image, as juggle update sends it
 update() {
 	echo "== Update" | tee -a "$work/out/summary.log"
-	if ssh_pi 'sudo -n /usr/lib/applpi/os-update write' < "$1" > "$work/out/update.log" 2>&1; then
+	if ssh_pi 'sudo -n /usr/lib/juggle/os-update write' < "$1" > "$work/out/update.log" 2>&1; then
 		echo "Written to slot B" | tee -a "$work/out/summary.log"
 	else
 		echo "Update failed: $(tail -1 "$work/out/update.log")" | tee -a "$work/out/summary.log"
 	fi
-	ssh_pi 'sudo -n /usr/lib/applpi/os-update status; grep ^os_prefix /boot/firmware/tryboot.txt; ls /boot/firmware/slotB | grep -v dtb' \
+	ssh_pi 'sudo -n /usr/lib/juggle/os-update status; grep ^os_prefix /boot/firmware/tryboot.txt; ls /boot/firmware/slotB | grep -v dtb' \
 		>> "$work/out/update.log" 2>&1 || true
 }
 
@@ -216,9 +216,9 @@ run_boot() {
 }
 
 ssh_pi() {
-	# Only the host key sent in applpi.json is trusted, on both boots
+	# Only the host key sent in juggle.json is trusted, on both boots
 	ssh -i /tmp/key -p 2222 -o UserKnownHostsFile=/tmp/known_hosts -o StrictHostKeyChecking=yes \
-		-o LogLevel=ERROR -o ConnectTimeout=20 -o ServerAliveInterval=15 applpi@localhost "$@"
+		-o LogLevel=ERROR -o ConnectTimeout=20 -o ServerAliveInterval=15 juggle@localhost "$@"
 }
 
 stop_qemu() {
