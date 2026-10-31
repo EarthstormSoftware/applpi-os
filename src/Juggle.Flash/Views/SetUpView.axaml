@@ -1,0 +1,32 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Juggle.Flash.ViewModels"
+             x:Class="Juggle.Flash.Views.SetUpView"
+             x:DataType="vm:SetUpViewModel">
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Bottom" Classes="buttons">
+      <Button Content="Back" Command="{Binding HomeCommand}" />
+      <Button Name="StartButton" Classes="accent" Content="Continue" Command="{Binding StartCommand}" />
+    </StackPanel>
+    <StackPanel Spacing="10" MaxWidth="560" HorizontalAlignment="Left">
+      <TextBlock Classes="title" Text="{Binding Title}" />
+      <TextBlock Classes="note" Text="Puts a Pi's settings on a card that already has Juggle OS. The Pi reads them at its next boot, then deletes them from the card." />
+      <DockPanel Margin="0,6,0,0">
+        <Button DockPanel.Dock="Right" Content="Refresh" Command="{Binding RefreshCommand}" VerticalAlignment="Bottom" />
+        <TextBlock Text="Juggle cards in this computer's card readers" FontWeight="SemiBold" VerticalAlignment="Bottom" />
+      </DockPanel>
+      <TextBlock Classes="note" Text="Looking for cards…" IsVisible="{Binding Looking}" />
+      <TextBlock Classes="note" IsVisible="{Binding NoCards}"
+                 Text="No Juggle card found. Put a card written with Juggle OS in the card reader, then Refresh (or flash a card first)." />
+      <ListBox Name="Cards" ItemsSource="{Binding Cards}" SelectedItem="{Binding Selected}">
+        <ListBox.ItemTemplate>
+          <DataTemplate x:DataType="vm:CardChoice">
+            <TextBlock Text="{Binding Description}" />
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+      <CheckBox IsChecked="{Binding Eject}" Content="Safely eject the card when done" />
+      <TextBlock Classes="note" Text="Next: the Pi's settings." />
+    </StackPanel>
+  </DockPanel>
+</UserControl>

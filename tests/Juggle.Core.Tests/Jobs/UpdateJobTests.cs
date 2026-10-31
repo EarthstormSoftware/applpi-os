@@ -80,6 +80,18 @@ public sealed class UpdateJobTests : IDisposable
     }
 
     [Fact]
+    public void SaysWhenItCantConnect()
+    {
+        var pi = new ScriptedPi([null]);
+
+        Assert.False(Update(pi));
+
+        Assert.Equal("Couldn't connect to juggle-test (juggle-test.local): ssh: connect to host juggle-test.local: " +
+            "timed out. Make sure it's turned on and connected to the network, then try again.", Assert.Single(host.Problems));
+        Assert.Single(pi.Commands);
+    }
+
+    [Fact]
     public void RefusesAnOsFromBeforeUpdates()
     {
         Assert.False(Update(new ScriptedPi("!")));

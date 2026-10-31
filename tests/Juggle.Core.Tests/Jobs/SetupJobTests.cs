@@ -119,6 +119,25 @@ public sealed class SetupJobTests : IDisposable
     }
 
     [Fact]
+    public void ANewPiStartsFromTheDefaultPiWhicheverWasSetUpLast()
+    {
+        host.Settings = new SettingsAnswers("chosen-pi", "America/New_York", new WifiSettings("US", "Home", "password1"));
+        Assert.True(Run(null, card));
+        host.Settings = new SettingsAnswers("other-pi", "Europe/Paris", null);
+        Assert.True(Run(null, card));
+        var store = DeviceStore.Load(paths.DeviceStore);
+        store.DefaultDevice = "chosen-pi";
+        store.Save(paths.DeviceStore);
+
+        Assert.True(Run(null, card));
+
+        Assert.Equal("chosen-pi", host.Form!.Hostname);
+        Assert.Equal("America/New_York", host.Form.DefaultsFor("third-pi").TimeZone);
+        // Setting up another Pi leaves the default as it was
+        Assert.Equal("chosen-pi", DeviceStore.Load(paths.DeviceStore).DefaultDevice);
+    }
+
+    [Fact]
     public void ANameGivenIsOfferedInLowerCase()
     {
         Assert.True(Run("Kitchen", card));

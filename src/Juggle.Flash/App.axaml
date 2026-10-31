@@ -7,18 +7,42 @@
 
   <!-- Each page's view, by its view model -->
   <Application.DataTemplates>
-    <DataTemplate DataType="vm:StartViewModel">
-      <views:StartView />
-    </DataTemplate>
-    <DataTemplate DataType="vm:PlaceholderViewModel">
-      <views:PlaceholderView />
-    </DataTemplate>
-    <DataTemplate DataType="vm:JobViewModel">
-      <views:JobView />
-    </DataTemplate>
+    <DataTemplate DataType="vm:StartViewModel"><views:StartView /></DataTemplate>
+    <DataTemplate DataType="vm:FlashViewModel"><views:FlashView /></DataTemplate>
+    <DataTemplate DataType="vm:SetUpViewModel"><views:SetUpView /></DataTemplate>
+    <DataTemplate DataType="vm:PisViewModel"><views:PisView /></DataTemplate>
+    <DataTemplate DataType="vm:UpdateViewModel"><views:UpdateView /></DataTemplate>
+    <DataTemplate DataType="vm:JobViewModel"><views:JobView /></DataTemplate>
+    <DataTemplate DataType="vm:ChooseDiskViewModel"><views:ChooseDiskView /></DataTemplate>
+    <DataTemplate DataType="vm:ConfirmEraseViewModel"><views:ConfirmEraseView /></DataTemplate>
+    <DataTemplate DataType="vm:ChooseCardViewModel"><views:ChooseCardView /></DataTemplate>
+    <DataTemplate DataType="vm:SettingsViewModel"><views:SettingsView /></DataTemplate>
+    <DataTemplate DataType="vm:PiNameViewModel"><views:PiNameView /></DataTemplate>
+    <DataTemplate DataType="vm:ConfirmUpdateViewModel"><views:ConfirmUpdateView /></DataTemplate>
+    <DataTemplate DataType="vm:SshKeyViewModel"><views:SshKeyView /></DataTemplate>
   </Application.DataTemplates>
 
   <Application.Styles>
     <FluentTheme />
+    <Style Selector="TextBlock.title">
+      <Setter Property="FontSize" Value="18" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Margin" Value="0,0,0,8" />
+    </Style>
+    <Style Selector="TextBlock.note">
+      <Setter Property="Opacity" Value="0.7" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style Selector="TextBlock.error">
+      <Setter Property="Foreground" Value="{DynamicResource SystemControlErrorTextForegroundBrush}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <!-- Every page's buttons: together at the bottom right -->
+    <Style Selector="StackPanel.buttons">
+      <Setter Property="Orientation" Value="Horizontal" />
+      <Setter Property="Spacing" Value="8" />
+      <Setter Property="Margin" Value="0,16,0,0" />
+      <Setter Property="HorizontalAlignment" Value="Right" />
+    </Style>
   </Application.Styles>
 </Application>

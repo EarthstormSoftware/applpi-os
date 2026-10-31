@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Juggle.Core;
 
@@ -21,6 +22,13 @@ public sealed class DeviceStore
 
     /// <summary>The Pi set up most recently, whose settings are the defaults for the next one.</summary>
     public string? LastDevice { get; set; }
+
+    /// <summary>The Pi chosen as the default: new Pis start from its settings, whichever was set up last.</summary>
+    public string? DefaultDevice { get; set; }
+
+    /// <summary>The Pi a new one starts from: the default, or else the last one set up.</summary>
+    [JsonIgnore]
+    public string? StartingDevice => DefaultDevice is { } chosen && Devices.ContainsKey(chosen) ? chosen : LastDevice;
 
     public Dictionary<string, StoredDevice> Devices { get; set; } = [];
 
@@ -104,6 +112,10 @@ public sealed class DeviceStore
         if (LastDevice == hostname)
         {
             LastDevice = Devices.Keys.LastOrDefault();
+        }
+        if (DefaultDevice == hostname)
+        {
+            DefaultDevice = null;
         }
         return true;
     }

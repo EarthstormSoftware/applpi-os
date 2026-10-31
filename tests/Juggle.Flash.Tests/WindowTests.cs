@@ -43,7 +43,26 @@ public class WindowTests
         Avalonia.Threading.Dispatcher.UIThread.RunJobs();
 
         Assert.Equal("Flash a card", model.Page.Title);
-        Assert.Single(window.GetVisualDescendants().OfType<PlaceholderView>());
+        Assert.Single(window.GetVisualDescendants().OfType<FlashView>());
+    }
+
+    [AvaloniaFact]
+    public void ProblemsAreShownInTheirOwnColour()
+    {
+        var job = new JobViewModel("Update kitchen", action => action());
+        var model = new MainWindowViewModel();
+        model.Show(job);
+        var window = Show(model);
+
+        job.Say("Connecting to kitchen.local");
+        job.Problem("Couldn't connect to kitchen (kitchen.local).");
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        var lines = window.GetVisualDescendants().OfType<SelectableTextBlock>().ToDictionary(line => line.Text ?? "");
+        var problem = lines["Couldn't connect to kitchen (kitchen.local)."].Foreground;
+        // A colour the theme has (a missing one leaves the text without any: invisible)
+        Assert.NotNull(problem);
+        Assert.NotEqual(lines["Connecting to kitchen.local"].Foreground, problem);
     }
 
     [AvaloniaFact]

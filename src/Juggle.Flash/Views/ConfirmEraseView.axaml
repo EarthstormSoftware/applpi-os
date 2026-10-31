@@ -1,0 +1,17 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Juggle.Flash.ViewModels"
+             x:Class="Juggle.Flash.Views.ConfirmEraseView"
+             x:DataType="vm:ConfirmEraseViewModel">
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Bottom" Classes="buttons">
+      <Button Content="Cancel" Command="{Binding CancelCommand}" />
+      <Button Name="EraseButton" Classes="accent" Content="Erase and write" Command="{Binding EraseCommand}" />
+    </StackPanel>
+    <StackPanel Spacing="10" MaxWidth="560" HorizontalAlignment="Left">
+      <TextBlock Classes="title" Text="{Binding Title}" />
+      <TextBlock Text="Everything on this card will be erased:" TextWrapping="Wrap" />
+      <TextBlock Text="{Binding Card}" FontWeight="SemiBold" TextWrapping="Wrap" Margin="12,0,0,0" />
+    </StackPanel>
+  </DockPanel>
+</UserControl>

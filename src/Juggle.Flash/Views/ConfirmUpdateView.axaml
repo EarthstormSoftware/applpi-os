@@ -1,0 +1,18 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Juggle.Flash.ViewModels"
+             x:Class="Juggle.Flash.Views.ConfirmUpdateView"
+             x:DataType="vm:ConfirmUpdateViewModel">
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Bottom" Classes="buttons">
+      <Button Content="Cancel" Command="{Binding CancelCommand}" />
+      <Button Classes="accent" Content="Update" Command="{Binding UpdateCommand}" />
+    </StackPanel>
+    <StackPanel Spacing="10" MaxWidth="560" HorizontalAlignment="Left">
+      <TextBlock Classes="title" Text="{Binding Title}" />
+      <TextBlock Text="{Binding Running}" TextWrapping="Wrap" />
+      <TextBlock Text="{Binding Target}" TextWrapping="Wrap" />
+      <TextBlock Classes="note" Text="The Pi restarts into the new OS once. It keeps it if it starts properly, and otherwise goes back to the OS it has now." />
+    </StackPanel>
+  </DockPanel>
+</UserControl>

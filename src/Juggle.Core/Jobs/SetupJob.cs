@@ -94,7 +94,7 @@ public sealed class SetupJob(IJobHost host, JugglePaths? paths = null,
     public SetupPlan? Prepare(string? name)
     {
         var store = DeviceStore.Load(paths.DeviceStore);
-        var answers = host.AskSettings(new SettingsForm(name?.ToLowerInvariant() ?? store.LastDevice,
+        var answers = host.AskSettings(new SettingsForm(name?.ToLowerInvariant() ?? store.StartingDevice,
             hostname => DefaultsFor(store, hostname)));
         var hostname = answers.Hostname.ToLowerInvariant();
 
@@ -145,9 +145,9 @@ public sealed class SetupJob(IJobHost host, JugglePaths? paths = null,
         }
     }
 
-    // A Pi set up before keeps its settings; a new one starts from the last Pi's
+    // A Pi set up before keeps its settings; a new one starts from the default Pi's (or the last one set up)
     static (DeviceSettings Settings, string SshKeyFile)? Known(DeviceStore store, string hostname) =>
-        store.Get(hostname) ?? (store.LastDevice is null ? null : store.Get(store.LastDevice));
+        store.Get(hostname) ?? (store.StartingDevice is { } starting ? store.Get(starting) : null);
 
     static SettingsDefaults DefaultsFor(DeviceStore store, string hostname)
     {

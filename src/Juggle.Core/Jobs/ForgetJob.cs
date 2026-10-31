@@ -23,7 +23,7 @@ public sealed class ForgetJob(IJobHost host, JugglePaths? paths = null)
         }
         host.Say($"Forgot {name}: {(settings ? "its settings and host key" : "no saved settings")}, and " +
             $"{(knownHost ? $"{PiShell.HostFor(name)} in ssh's known_hosts" : "nothing in ssh's known_hosts")}.");
-        if (settings && store.LastDevice is { } last)
+        if (settings && store.StartingDevice is { } last)
         {
             host.Say($"New Pis now start from {last}'s settings.");
         }

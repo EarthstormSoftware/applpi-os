@@ -28,6 +28,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Juggle.Core\Juggle.Core.csproj" />
+    <!-- juggle, beside the app: started with administrator rights to write a card -->
+    <ProjectReference Include="..\Juggle.Cli\Juggle.Cli.csproj" />
   </ItemGroup>
 
 </Project>

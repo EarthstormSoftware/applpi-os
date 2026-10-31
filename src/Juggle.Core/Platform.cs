@@ -28,6 +28,20 @@ public static partial class Platform
     /// <summary>Whether this process may write a whole disk: an administrator on Windows, root on Linux.</summary>
     public static bool IsAdministrator => OperatingSystem.IsWindows() ? IsWindowsAdministrator() : Environment.IsPrivilegedProcess;
 
+    /// <summary>
+    /// Whether this process has a console (juggle in a terminal), which programs it starts share. A desktop app (Juggle
+    /// Flash) has none on Windows, where each console program it starts (ssh, ssh-keygen) would open a window of its own,
+    /// so they're started without one (see <see cref="NoWindow"/>).
+    /// </summary>
+    public static bool HasConsole { get; } = !OperatingSystem.IsWindows() || GetConsoleWindow() != 0;
+
+    /// <summary>Starts a program without a window of its own when this process has no console to share.</summary>
+    public static ProcessStartInfo NoWindow(this ProcessStartInfo start)
+    {
+        start.CreateNoWindow = !HasConsole;
+        return start;
+    }
+
     /// <summary>The user who ran this with sudo, or null when it isn't running as root under sudo.</summary>
     static string? SudoUser => !OperatingSystem.IsWindows() && Environment.IsPrivilegedProcess
         && Environment.GetEnvironmentVariable("SUDO_USER") is { Length: > 0 } user && user != "root" ? user : null;
@@ -82,7 +96,7 @@ public static partial class Platform
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-        };
+        }.NoWindow();
         foreach (var arg in args)
         {
             start.ArgumentList.Add(arg);
@@ -124,6 +138,9 @@ public static partial class Platform
     [SupportedOSPlatform("windows")]
     static bool IsWindowsAdministrator() =>
         new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
+
+    [LibraryImport("kernel32.dll")]
+    private static partial nint GetConsoleWindow();
 
     [LibraryImport("libc", EntryPoint = "chown", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
     private static partial int Chown(string path, uint owner, uint group);

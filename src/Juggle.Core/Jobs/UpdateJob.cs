@@ -20,7 +20,7 @@ public sealed class UpdateJob(IJobHost host, ImageSource images, JugglePaths? pa
         name = name?.ToLowerInvariant();
         if (name is null)
         {
-            name = host.AskPiName(DeviceStore.Load(paths.DeviceStore).LastDevice).ToLowerInvariant();
+            name = host.AskPiName(DeviceStore.Load(paths.DeviceStore).StartingDevice).ToLowerInvariant();
         }
         else if (SettingsRules.CheckHostname(name) is { } problem)
         {
@@ -40,7 +40,13 @@ public sealed class UpdateJob(IJobHost host, ImageSource images, JugglePaths? pa
         {
             before = SlotStatus.Parse(pi.Run($"{SlotStatus.Command} status"));
         }
-        catch (PiCommandException error) when (!error.Unreachable)
+        catch (PiCommandException error) when (error.Unreachable)
+        {
+            host.Problem($"Couldn't connect to {name} ({pi.Host}): {error.Message.TrimEnd('.')}. Make sure it's turned on " +
+                "and connected to the network, then try again.");
+            return false;
+        }
+        catch (PiCommandException error)
         {
             host.Problem($"{name} can't be updated over SSH ({error.Message}): its OS is from before OS updates, so " +
                 "flash it once with juggle flash.");

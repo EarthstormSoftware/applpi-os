@@ -91,7 +91,7 @@ public static class SshKeys
 
     static bool RunKeygen(string[] args)
     {
-        using var keygen = Process.Start(new ProcessStartInfo("ssh-keygen", args) { UseShellExecute = false })
+        using var keygen = Process.Start(new ProcessStartInfo("ssh-keygen", args) { UseShellExecute = false }.NoWindow())
             ?? throw new InvalidOperationException("ssh-keygen didn't start: is OpenSSH installed?");
         keygen.WaitForExit();
         return keygen.ExitCode == 0;

@@ -1,0 +1,17 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Juggle.Flash.ViewModels"
+             x:Class="Juggle.Flash.Views.UpdateView"
+             x:DataType="vm:UpdateViewModel">
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Bottom" Classes="buttons">
+      <Button Content="Back" Command="{Binding HomeCommand}" />
+      <Button Name="StartButton" Classes="accent" Content="Continue" Command="{Binding StartCommand}" />
+    </StackPanel>
+    <StackPanel Spacing="10" MaxWidth="560" HorizontalAlignment="Left">
+      <TextBlock Classes="title" Text="{Binding Title}" />
+      <TextBlock Text="{Binding Reminder}" TextWrapping="Wrap" />
+      <TextBlock Classes="note" Text="Next: the Pi's OS now, and the latest release it would get, before anything changes." />
+    </StackPanel>
+  </DockPanel>
+</UserControl>

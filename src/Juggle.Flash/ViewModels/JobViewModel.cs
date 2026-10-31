@@ -33,13 +33,23 @@ public sealed partial class JobViewModel(string title, Action<Action>? dispatch 
     bool progressKnown;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(Status))]
     bool isRunning;
 
     /// <summary>Whether the job did what it set out to, once it has ended.</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(Status))]
     bool? succeeded;
 
     public bool ShowsProgress => ProgressText is not null;
+
+    /// <summary>Where the job is: working, done, or stopped (having said why).</summary>
+    public string Status => IsRunning ? "Working…" : Succeeded switch
+    {
+        true => "Done.",
+        false => "Stopped.",
+        null => "",
+    };
 
     /// <summary>Runs a job (on a thread of its own) until it ends; it returns whether it did what it set out to.</summary>
     public async Task RunAsync(Func<bool> job)
@@ -49,6 +59,12 @@ public sealed partial class JobViewModel(string title, Action<Action>? dispatch 
         try
         {
             Succeeded = await Task.Run(job);
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancelled at a question, before anything was written
+            Say("Stopped: nothing was changed.");
+            Succeeded = false;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException)
         {

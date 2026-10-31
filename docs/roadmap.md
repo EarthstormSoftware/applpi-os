@@ -355,6 +355,20 @@ Done (2026-10-31):
   dismounts it and ejects the media; `juggle setup` ejects without administrator rights. On Linux it syncs,
   unmounts and runs `eject` (as a user, `udisksctl`); without them it's still safe to take out. `--no-eject` leaves
   the card in. With Wi-Fi saved, `-` chooses Ethernet only (Enter takes the saved network).
+- **The app**: `src/Juggle.Flash` (`juggle-flash`), Avalonia 12 with its Fluent theme (light and dark as the
+  system), the logo's three balls drawn, MVVM with CommunityToolkit.Mvvm, tested with Avalonia's headless tests
+  (xunit v3, kept at 3.2.2: 4.x needs Microsoft's new test platform, which the .NET 10 SDK turns on for every test
+  project at once). A job runs on a thread of its own; `WindowJobHost` shows a page for each of its questions (the
+  card, the settings, the last check before erasing, the update) and waits for the answer, and its log and progress
+  in between. Pages: Flash a card (the image: the latest release, a version or a file; eject when done), Set up a
+  card (the Juggle cards found, with Refresh), and My Pis (each to update, after a reminder that it must be on and
+  on the network, to forget, or to use as the default). The settings form fills in the Pi's own settings, or the
+  default Pi's for a new name, checks each field as it's typed with juggle's rules, keeps a saved Wi-Fi password if
+  left empty, and offers only time zones the Pi takes. Every page's buttons are at the bottom right. `juggle` is
+  built beside the app and started with administrator rights to write a card. The default Pi (`DefaultDevice` in
+  `devices.json`) is the one new Pis start from in `juggle` too, whichever was set up last. Console programs the
+  app starts (ssh, ssh-keygen) get no window of their own. An unreachable Pi is said to be one. Without an SSH key,
+  the app shows the `ssh-keygen` command to run rather than asking for its passphrase itself.
 
 ### 6. Check the test Pi
 

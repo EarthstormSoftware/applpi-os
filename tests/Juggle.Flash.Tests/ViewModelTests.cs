@@ -15,7 +15,7 @@ public class ViewModelTests
         ((StartViewModel)window.Page).FlashCommand.Execute(null);
 
         Assert.Equal("Flash a card", window.Page.Title);
-        Assert.True(window.CanGoHome);
+        Assert.True(window.GoHomeCommand.CanExecute(null));
         window.GoHomeCommand.Execute(null);
         Assert.IsType<StartViewModel>(window.Page);
     }

@@ -4,26 +4,40 @@
              x:Class="Juggle.Flash.Views.JobView"
              x:DataType="vm:JobViewModel">
   <DockPanel>
-    <TextBlock DockPanel.Dock="Top" Text="{Binding Title}" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12" />
-    <StackPanel DockPanel.Dock="Bottom" Spacing="6" Margin="0,12,0,0" IsVisible="{Binding ShowsProgress}">
-      <TextBlock Text="{Binding ProgressText}" />
-      <ProgressBar Value="{Binding ProgressValue}" Maximum="100"
-                   IsIndeterminate="{Binding !ProgressKnown}" />
-    </StackPanel>
-    <ScrollViewer>
-      <ItemsControl ItemsSource="{Binding Lines}">
-        <ItemsControl.ItemTemplate>
-          <DataTemplate x:DataType="vm:JobLine">
-            <TextBlock Text="{Binding Text}" TextWrapping="Wrap" Margin="0,2"
-                       Classes.problem="{Binding IsProblem}" />
-          </DataTemplate>
-        </ItemsControl.ItemTemplate>
-      </ItemsControl>
-    </ScrollViewer>
+    <TextBlock DockPanel.Dock="Top" Classes="title" Text="{Binding Title}" />
+
+    <!-- Below the log: where the job has got, and the way back once it has ended -->
+    <DockPanel DockPanel.Dock="Bottom" Margin="0,16,0,0">
+      <StackPanel DockPanel.Dock="Right" Classes="buttons" Margin="16,0,0,0" VerticalAlignment="Bottom">
+        <Button Name="DoneButton" Classes="accent" Content="Back to start" Command="{Binding HomeCommand}" />
+      </StackPanel>
+      <StackPanel Spacing="6" VerticalAlignment="Bottom">
+        <StackPanel Spacing="6" IsVisible="{Binding ShowsProgress}">
+          <TextBlock Text="{Binding ProgressText}" />
+          <ProgressBar Value="{Binding ProgressValue}" Maximum="100" IsIndeterminate="{Binding !ProgressKnown}" />
+        </StackPanel>
+        <TextBlock Name="StatusText" Text="{Binding Status}" FontWeight="SemiBold" />
+      </StackPanel>
+    </DockPanel>
+
+    <!-- The log: everything the job has said -->
+    <Border CornerRadius="6" Padding="12,8" BorderThickness="1"
+            Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
+            BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}">
+      <ScrollViewer Name="Log">
+        <ItemsControl ItemsSource="{Binding Lines}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:JobLine">
+              <SelectableTextBlock Text="{Binding Text}" TextWrapping="Wrap" Margin="0,2" Classes.error="{Binding IsProblem}" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
+    </Border>
   </DockPanel>
   <UserControl.Styles>
-    <Style Selector="TextBlock.problem">
-      <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCriticalBrush}" />
+    <Style Selector="SelectableTextBlock.error">
+      <Setter Property="Foreground" Value="{DynamicResource SystemControlErrorTextForegroundBrush}" />
     </Style>
   </UserControl.Styles>
 </UserControl>

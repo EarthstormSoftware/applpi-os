@@ -31,7 +31,7 @@ public sealed class PiShell(string host) : IPi
             RedirectStandardInput = input is not null,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-        };
+        }.NoWindow();
         // Without input, -n keeps ssh off this console's input (it still asks for a key's passphrase there)
         foreach (var arg in (string[])[
             .. input is null ? ["-n"] : Array.Empty<string>(),

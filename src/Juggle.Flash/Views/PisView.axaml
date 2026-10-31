@@ -1,0 +1,44 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Juggle.Flash.ViewModels"
+             x:Class="Juggle.Flash.Views.PisView"
+             x:DataType="vm:PisViewModel">
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Bottom" Classes="buttons">
+      <Button Content="Back" Command="{Binding HomeCommand}" />
+    </StackPanel>
+    <TextBlock DockPanel.Dock="Top" Classes="title" Text="{Binding Title}" />
+    <TextBlock DockPanel.Dock="Top" Classes="note" IsVisible="{Binding IsEmpty}"
+               Text="No Pis set up on this computer yet: flash a card to set one up." />
+    <ScrollViewer>
+      <ItemsControl ItemsSource="{Binding Pis}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:PiItem">
+            <Border Padding="12,10" Margin="0,0,0,8" CornerRadius="6"
+                    Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}">
+              <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                  <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding !ConfirmingForget}">
+                    <Button Content="Use as default" Command="{Binding UseAsDefaultCommand}" IsVisible="{Binding !IsDefault}" />
+                    <Button Content="Update" Command="{Binding UpdateCommand}" />
+                    <Button Content="Forget" Command="{Binding ForgetCommand}" />
+                  </StackPanel>
+                  <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding ConfirmingForget}">
+                    <TextBlock Text="Forget its settings and host key?" VerticalAlignment="Center" />
+                    <Button Content="Keep" Command="{Binding KeepCommand}" />
+                    <Button Content="Forget it" Command="{Binding ForgetNowCommand}" />
+                  </StackPanel>
+                </StackPanel>
+                <StackPanel VerticalAlignment="Center">
+                  <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                  <TextBlock Classes="note" Text="{Binding Address}" />
+                  <TextBlock Classes="note" Text="Used as default: new Pis start from its settings" IsVisible="{Binding IsDefault}" />
+                </StackPanel>
+              </DockPanel>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </ScrollViewer>
+  </DockPanel>
+</UserControl>

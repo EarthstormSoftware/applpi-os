@@ -1,0 +1,45 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Juggle.Flash.ViewModels"
+             x:Class="Juggle.Flash.Views.SettingsView"
+             x:DataType="vm:SettingsViewModel">
+  <UserControl.Styles>
+    <Style Selector="TextBlock.label">
+      <Setter Property="Margin" Value="0,6,0,2" />
+    </Style>
+  </UserControl.Styles>
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Bottom" Classes="buttons">
+      <Button Content="Cancel" Command="{Binding CancelCommand}" />
+      <Button Name="ContinueButton" Classes="accent" Content="Continue" Command="{Binding ContinueCommand}" />
+    </StackPanel>
+    <TextBlock DockPanel.Dock="Top" Classes="title" Text="{Binding Title}" />
+    <ScrollViewer>
+      <StackPanel Spacing="2" MaxWidth="460" HorizontalAlignment="Left">
+        <TextBlock Classes="label" Text="Name" />
+        <TextBox Name="HostnameBox" Text="{Binding Hostname}" PlaceholderText="kitchen" />
+        <TextBlock Classes="error" Text="{Binding HostnameError}" IsVisible="{Binding HostnameError, Converter={x:Static ObjectConverters.IsNotNull}}" />
+        <TextBlock Classes="note" Text="{Binding Address}" />
+
+        <TextBlock Classes="label" Text="Time zone" />
+        <AutoCompleteBox Text="{Binding TimeZone}" ItemsSource="{Binding Source={x:Static vm:SettingsViewModel.TimeZones}}"
+                         FilterMode="ContainsOrdinal" PlaceholderText="Europe/London" />
+        <TextBlock Classes="error" Text="{Binding TimeZoneError}" IsVisible="{Binding TimeZoneError, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+        <CheckBox Name="WifiBox" IsChecked="{Binding UseWifi}" Content="Wi-Fi (without it, connect the Pi with an Ethernet cable)" Margin="0,10,0,0" />
+        <StackPanel Spacing="2" IsVisible="{Binding UseWifi}" Margin="28,0,0,0">
+          <TextBlock Classes="label" Text="Network" />
+          <TextBox Text="{Binding Ssid}" />
+          <TextBlock Classes="error" Text="{Binding SsidError}" IsVisible="{Binding SsidError, Converter={x:Static ObjectConverters.IsNotNull}}" />
+          <TextBlock Classes="label" Text="Password" />
+          <TextBox Text="{Binding Password}" PasswordChar="•" />
+          <TextBlock Classes="note" Text="Leave it empty to keep the saved password." IsVisible="{Binding KeepsPassword}" />
+          <TextBlock Classes="error" Text="{Binding PasswordError}" IsVisible="{Binding PasswordError, Converter={x:Static ObjectConverters.IsNotNull}}" />
+          <TextBlock Classes="label" Text="Country (two letters, for the channels it may use)" />
+          <TextBox Text="{Binding Country}" Width="80" HorizontalAlignment="Left" MaxLength="2" />
+          <TextBlock Classes="error" Text="{Binding CountryError}" IsVisible="{Binding CountryError, Converter={x:Static ObjectConverters.IsNotNull}}" />
+        </StackPanel>
+      </StackPanel>
+    </ScrollViewer>
+  </DockPanel>
+</UserControl>

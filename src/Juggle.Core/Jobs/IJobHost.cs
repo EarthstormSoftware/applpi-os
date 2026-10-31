@@ -73,7 +73,7 @@ public readonly record struct JobProgress(JobStage Stage, long Done, long? Total
 
 /// <summary>
 /// The settings to ask for. Hostname is the name to offer; DefaultsFor gives the rest for a name: a Pi set up before
-/// keeps its own, and a new one starts from the last Pi's.
+/// keeps its own, and a new one starts from the default Pi's (or the last one set up).
 /// </summary>
 public sealed record SettingsForm(string? Hostname, Func<string, SettingsDefaults> DefaultsFor);
 
