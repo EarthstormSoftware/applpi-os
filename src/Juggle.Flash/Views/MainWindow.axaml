@@ -1,0 +1,27 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Juggle.Flash.ViewModels"
+        xmlns:views="using:Juggle.Flash.Views"
+        x:Class="Juggle.Flash.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="Juggle Flash"
+        Width="760" Height="580" MinWidth="520" MinHeight="420"
+        WindowStartupLocation="CenterScreen">
+  <DockPanel>
+    <Border DockPanel.Dock="Top" Padding="20,14" BorderThickness="0,0,0,1"
+            BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}">
+      <DockPanel>
+        <Button DockPanel.Dock="Right" VerticalAlignment="Center" Content="Start"
+                Command="{Binding GoHomeCommand}" IsVisible="{Binding CanGoHome}" />
+        <StackPanel Orientation="Horizontal" Spacing="14">
+          <views:Logo Width="48" Height="30" />
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="Juggle Flash" FontSize="20" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding Version}" FontSize="12" Opacity="0.6" />
+          </StackPanel>
+        </StackPanel>
+      </DockPanel>
+    </Border>
+    <ContentControl Name="PageHost" Content="{Binding Page}" Margin="24" />
+  </DockPanel>
+</Window>

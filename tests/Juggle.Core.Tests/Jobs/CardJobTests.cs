@@ -88,7 +88,7 @@ public sealed class CardJobTests : IDisposable
     }
 
     [Fact]
-    public void ReportsBackOverAStream()
+    public async Task ReportsBackOverAStream()
     {
         var toJob = new Pipe();
         var fromJob = new Pipe();
@@ -102,7 +102,7 @@ public sealed class CardJobTests : IDisposable
             toJob.Writer.AsStream(), fromJob.Reader.AsStream(), host);
 
         Assert.Equal(CardOutcome.Ejected, outcome);
-        Assert.Equal(CardOutcome.Ejected, job.Result);
+        Assert.Equal(CardOutcome.Ejected, await job);
         Assert.Contains("Written and checked.", host.Said);
         Assert.Contains(new JobProgress(JobStage.Check, 1 << 20, 1 << 20), host.Progresses);
         // The settings arrived whole, secrets included

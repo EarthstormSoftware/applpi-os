@@ -1,0 +1,29 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Juggle.Flash.ViewModels"
+             x:Class="Juggle.Flash.Views.JobView"
+             x:DataType="vm:JobViewModel">
+  <DockPanel>
+    <TextBlock DockPanel.Dock="Top" Text="{Binding Title}" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12" />
+    <StackPanel DockPanel.Dock="Bottom" Spacing="6" Margin="0,12,0,0" IsVisible="{Binding ShowsProgress}">
+      <TextBlock Text="{Binding ProgressText}" />
+      <ProgressBar Value="{Binding ProgressValue}" Maximum="100"
+                   IsIndeterminate="{Binding !ProgressKnown}" />
+    </StackPanel>
+    <ScrollViewer>
+      <ItemsControl ItemsSource="{Binding Lines}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:JobLine">
+            <TextBlock Text="{Binding Text}" TextWrapping="Wrap" Margin="0,2"
+                       Classes.problem="{Binding IsProblem}" />
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </ScrollViewer>
+  </DockPanel>
+  <UserControl.Styles>
+    <Style Selector="TextBlock.problem">
+      <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCriticalBrush}" />
+    </Style>
+  </UserControl.Styles>
+</UserControl>

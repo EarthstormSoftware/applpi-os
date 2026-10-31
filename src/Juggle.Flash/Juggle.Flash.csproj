@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>juggle-flash</AssemblyName>
+    <RootNamespace>Juggle.Flash</RootNamespace>
+    <Product>Juggle Flash</Product>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <!-- On Linux, without the ICU library, as juggle: only invariant formatting is needed -->
+    <InvariantGlobalization Condition="$(RuntimeIdentifier.StartsWith('linux'))">true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Juggle.Flash.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.4" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Juggle.Core\Juggle.Core.csproj" />
+  </ItemGroup>
+
+</Project>

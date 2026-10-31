@@ -2,8 +2,10 @@
   <Folder Name="/src/">
     <Project Path="src/Juggle.Cli/Juggle.Cli.csproj" />
     <Project Path="src/Juggle.Core/Juggle.Core.csproj" />
+    <Project Path="src/Juggle.Flash/Juggle.Flash.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Juggle.Core.Tests/Juggle.Core.Tests.csproj" />
+    <Project Path="tests/Juggle.Flash.Tests/Juggle.Flash.Tests.csproj" />
   </Folder>
 </Solution>

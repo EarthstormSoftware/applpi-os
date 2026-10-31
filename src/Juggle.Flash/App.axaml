@@ -1,0 +1,24 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Juggle.Flash.ViewModels"
+             xmlns:views="using:Juggle.Flash.Views"
+             x:Class="Juggle.Flash.App"
+             RequestedThemeVariant="Default">
+
+  <!-- Each page's view, by its view model -->
+  <Application.DataTemplates>
+    <DataTemplate DataType="vm:StartViewModel">
+      <views:StartView />
+    </DataTemplate>
+    <DataTemplate DataType="vm:PlaceholderViewModel">
+      <views:PlaceholderView />
+    </DataTemplate>
+    <DataTemplate DataType="vm:JobViewModel">
+      <views:JobView />
+    </DataTemplate>
+  </Application.DataTemplates>
+
+  <Application.Styles>
+    <FluentTheme />
+  </Application.Styles>
+</Application>

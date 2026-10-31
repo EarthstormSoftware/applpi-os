@@ -1,0 +1,38 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Juggle.Flash.ViewModels"
+             x:Class="Juggle.Flash.Views.StartView"
+             x:DataType="vm:StartViewModel">
+  <UserControl.Styles>
+    <Style Selector="Button.choice">
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Left" />
+      <Setter Property="Padding" Value="18,14" />
+    </Style>
+    <Style Selector="Button.choice TextBlock.note">
+      <Setter Property="Opacity" Value="0.7" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+  </UserControl.Styles>
+  <StackPanel Spacing="12" MaxWidth="560" HorizontalAlignment="Left">
+    <TextBlock Text="{Binding Title}" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,8" />
+    <Button Name="FlashButton" Classes="choice" Command="{Binding FlashCommand}">
+      <StackPanel Spacing="2">
+        <TextBlock Text="Flash a card" FontWeight="SemiBold" />
+        <TextBlock Classes="note" Text="Write Juggle OS to a card in this computer's card reader, with a Pi's settings." />
+      </StackPanel>
+    </Button>
+    <Button Name="SetUpButton" Classes="choice" Command="{Binding SetUpCommand}">
+      <StackPanel Spacing="2">
+        <TextBlock Text="Set up a card" FontWeight="SemiBold" />
+        <TextBlock Classes="note" Text="Put a Pi's settings on a card that already has Juggle OS." />
+      </StackPanel>
+    </Button>
+    <Button Name="PisButton" Classes="choice" Command="{Binding PisCommand}">
+      <StackPanel Spacing="2">
+        <TextBlock Text="My Pis" FontWeight="SemiBold" />
+        <TextBlock Classes="note" Text="The Pis set up on this computer: update their OS, or forget them." />
+      </StackPanel>
+    </Button>
+  </StackPanel>
+</UserControl>

@@ -1,0 +1,12 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Juggle.Flash.Views.Logo">
+  <!-- Juggle OS's three balls, in the air -->
+  <Viewbox Stretch="Uniform">
+    <Canvas Width="68" Height="42">
+      <Ellipse Canvas.Left="0" Canvas.Top="16" Width="24" Height="24" Fill="#3DDC84" />
+      <Ellipse Canvas.Left="22" Canvas.Top="0" Width="24" Height="24" Fill="#FFB020" />
+      <Ellipse Canvas.Left="44" Canvas.Top="16" Width="24" Height="24" Fill="#4DA3FF" />
+    </Canvas>
+  </Viewbox>
+</UserControl>
