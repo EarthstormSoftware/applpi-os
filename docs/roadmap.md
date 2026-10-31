@@ -335,7 +335,7 @@ Plan (2026-10-31), for v1.0: **Juggle Flash**, on Windows and Linux x64 (macOS l
 Steps: the jobs into `Juggle.Core` (with `juggle` on them); the elevated job and its pipe; the app's skeleton; the
 screens; packaging in the workflow; testing on both; the README, the release notes and the website.
 
-Done (2026-10-31):
+Done (2026-10-31), released in v0.8.0:
 
 - **The jobs**: `Juggle.Core.Jobs` has `FlashJob`, `SetupJob`, `UpdateJob`, `ForgetJob` and `ImageSource`. They tell
   an `IJobHost` what's happening (messages, problems, progress by stage) and ask it for each decision with one
