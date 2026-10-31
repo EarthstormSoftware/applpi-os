@@ -46,6 +46,18 @@ public sealed class UpdateJob(IJobHost host, ImageSource images, JugglePaths? pa
                 "and connected to the network, then try again.");
             return false;
         }
+        catch (PiCommandException error) when (error.KeyRefused)
+        {
+            host.Problem($"{name} didn't take your SSH key ({error.Message.TrimEnd('.')}). If your key has a passphrase, " +
+                "add it to ssh-agent (ssh-add) and try again; otherwise the Pi was set up with another key.");
+            return false;
+        }
+        catch (PiCommandException error) when (error.HostKeyRefused)
+        {
+            host.Problem($"ssh on this computer doesn't know {name}'s host key, or it has changed ({error.Message.TrimEnd('.')}). " +
+                "Set it up from this computer, or forget it here if it's a different Pi now.");
+            return false;
+        }
         catch (PiCommandException error)
         {
             host.Problem($"{name} can't be updated over SSH ({error.Message}): its OS is from before OS updates, so " +

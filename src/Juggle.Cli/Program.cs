@@ -28,6 +28,8 @@ static class Program
                                 goes into the slot that isn't running, and the Pi restarts into it once; it keeps it
                                 if it starts properly, and otherwise goes back to the OS it had. --yes doesn't ask.
           juggle forget <name>  Forget a Pi you no longer use: its saved settings and host key, and ssh's known host.
+          juggle default [name] Make a Pi the default: new Pis start from its settings, whichever was set up last.
+                                Without a name, say which Pi new ones start from.
           juggle --version      Show this tool's version.
 
         {(OperatingSystem.IsWindows()
@@ -56,6 +58,8 @@ static class Program
                 ["flash", var image] => Flash(image, eject),
                 ["update", .. var rest] when rest.Count(arg => arg != "--yes") <= 2 => Update(rest),
                 ["forget", var name] => ExitCode(new ForgetJob(Host).Run(name)),
+                ["default"] => ExitCode(new DefaultJob(Host).Run(null)),
+                ["default", var name] => ExitCode(new DefaultJob(Host).Run(name)),
                 // Started by juggle itself, with administrator rights, to write a card
                 ["card-job", "--pipe", var pipe] => RunCardJob(pipe),
                 ["card-job", "--stdio"] => RunCardJob(null),

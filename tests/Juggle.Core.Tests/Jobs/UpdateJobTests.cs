@@ -91,6 +91,19 @@ public sealed class UpdateJobTests : IDisposable
         Assert.Single(pi.Commands);
     }
 
+    [Theory]
+    [InlineData("juggle@juggle-test.local: Permission denied (publickey).", "didn't take your SSH key")]
+    [InlineData("Host key verification failed.", "doesn't know juggle-test's host key")]
+    public void SaysWhenThePiTurnedSshAway(string why, string said)
+    {
+        var pi = new ScriptedPi(Before) { StatusFails = new PiCommandException(255, why) };
+
+        Assert.False(Update(pi));
+
+        Assert.Contains(said, Assert.Single(host.Problems));
+        Assert.DoesNotContain("turned on", host.Problems[0]);
+    }
+
     [Fact]
     public void RefusesAnOsFromBeforeUpdates()
     {

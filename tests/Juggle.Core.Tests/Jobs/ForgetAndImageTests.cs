@@ -37,6 +37,43 @@ public sealed class ForgetAndImageTests : IDisposable
     }
 
     [Fact]
+    public void ChoosesTheDefaultPi()
+    {
+        var store = new DeviceStore();
+        store.Set(new DeviceSettings("attic", null, null, [Key]), paths.PublicKey);
+        store.Set(new DeviceSettings("porch", null, null, [Key]), paths.PublicKey);
+        store.Save(paths.DeviceStore);
+
+        Assert.True(new DefaultJob(host, paths).Run(null));
+        Assert.True(new DefaultJob(host, paths).Run("Attic"));
+        Assert.False(new DefaultJob(host, paths).Run("nobody"));
+
+        Assert.Equal([
+            "New Pis start from porch's settings: it was set up last. juggle default <name> chooses one.",
+            "New Pis start from attic's settings: it's the default.",
+        ], host.Said);
+        Assert.Equal("nobody isn't known on this PC: set it up first (juggle flash or juggle setup).", Assert.Single(host.Problems));
+        Assert.Equal("attic", DeviceStore.Load(paths.DeviceStore).DefaultDevice);
+    }
+
+    [Fact]
+    public void ForgettingTheDefaultPiGoesBackToTheLastOne()
+    {
+        var store = new DeviceStore();
+        store.Set(new DeviceSettings("attic", null, null, [Key]), paths.PublicKey);
+        store.Set(new DeviceSettings("porch", null, null, [Key]), paths.PublicKey);
+        store.DefaultDevice = "attic";
+        store.Save(paths.DeviceStore);
+
+        Assert.True(new ForgetJob(host, paths).Run("attic"));
+
+        var after = DeviceStore.Load(paths.DeviceStore);
+        Assert.Null(after.DefaultDevice);
+        Assert.Equal("porch", after.StartingDevice);
+        Assert.Equal("New Pis now start from porch's settings.", host.Said[^1]);
+    }
+
+    [Fact]
     public void HasNothingToForgetForAnUnknownPi()
     {
         Assert.False(new ForgetJob(host, paths).Run("nobody"));

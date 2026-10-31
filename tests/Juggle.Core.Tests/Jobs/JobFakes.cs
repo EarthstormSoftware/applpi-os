@@ -106,6 +106,9 @@ sealed class ScriptedPi(params string?[] statuses) : IPi
     /// <summary>Why write fails, or null if it works.</summary>
     public string? WriteFails { get; set; }
 
+    /// <summary>What ssh fails with for every status (it can't get in), or null.</summary>
+    public PiCommandException? StatusFails { get; set; }
+
     public string Run(string command, Action<string>? onMessage = null, int connectTimeoutSeconds = 15)
     {
         Commands.Add(command);
@@ -113,6 +116,10 @@ sealed class ScriptedPi(params string?[] statuses) : IPi
         switch (verb)
         {
             case "status":
+                if (StatusFails is { } failure)
+                {
+                    throw failure;
+                }
                 if (statuses.Count > 0)
                 {
                     last = statuses.Dequeue();

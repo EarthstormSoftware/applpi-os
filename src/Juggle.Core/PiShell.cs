@@ -32,9 +32,11 @@ public sealed class PiShell(string host) : IPi
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         }.NoWindow();
-        // Without input, -n keeps ssh off this console's input (it still asks for a key's passphrase there)
+        // Without input, -n keeps ssh off this console's input (it still asks for a key's passphrase there). Without a
+        // console (Juggle Flash), there's nowhere to ask: BatchMode makes ssh fail at once rather than try
         foreach (var arg in (string[])[
             .. input is null ? ["-n"] : Array.Empty<string>(),
+            .. Platform.HasConsole ? Array.Empty<string>() : ["-o", "BatchMode=yes"],
             "-o", $"ConnectTimeout={connectTimeoutSeconds}", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4",
             $"{User}@{Host}", command])
         {
@@ -110,7 +112,14 @@ public sealed class PiCommandException(int exitCode, string message) : InvalidOp
 {
     public int ExitCode { get; } = exitCode;
 
-    public bool Unreachable => ExitCode == 255;
+    /// <summary>ssh couldn't reach the Pi (not: it reached it, and was turned away).</summary>
+    public bool Unreachable => ExitCode == 255 && !KeyRefused && !HostKeyRefused;
+
+    /// <summary>The Pi didn't take the user's SSH key (or ssh couldn't use it: a passphrase it had nowhere to ask for).</summary>
+    public bool KeyRefused => ExitCode == 255 && Message.Contains("Permission denied", StringComparison.Ordinal);
+
+    /// <summary>ssh didn't know the Pi's host key, or it has changed.</summary>
+    public bool HostKeyRefused => ExitCode == 255 && Message.Contains("Host key verification failed", StringComparison.Ordinal);
 }
 
 /// <summary>
