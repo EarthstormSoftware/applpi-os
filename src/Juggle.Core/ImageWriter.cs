@@ -203,7 +203,7 @@ public static partial class ImageWriter
     }
 
     [SupportedOSPlatform("windows")]
-    static SafeFileHandle LockVolume(string driveLetter)
+    internal static SafeFileHandle LockVolume(string driveLetter)
     {
         var volume = Open($@"\\.\{driveLetter}");
         try
@@ -240,7 +240,7 @@ public static partial class ImageWriter
         return handle;
     }
 
-    static void DeviceIoControl(SafeFileHandle device, uint code)
+    internal static void DeviceIoControl(SafeFileHandle device, uint code)
     {
         if (!DeviceIoControl(device, code, 0, 0, 0, 0, out _, 0))
         {

@@ -335,6 +335,27 @@ Plan (2026-10-31), for v1.0: **Juggle Flash**, on Windows and Linux x64 (macOS l
 Steps: the jobs into `Juggle.Core` (with `juggle` on them); the elevated job and its pipe; the app's skeleton; the
 screens; packaging in the workflow; testing on both; the README, the release notes and the website.
 
+Done (2026-10-31):
+
+- **The jobs**: `Juggle.Core.Jobs` has `FlashJob`, `SetupJob`, `UpdateJob`, `ForgetJob` and `ImageSource`. They tell
+  an `IJobHost` what's happening (messages, problems, progress by stage) and ask it for each decision with one
+  method each (the card, the settings as a form with each name's defaults, the confirmations), so the app can show a
+  screen for each; `juggle`'s `ConsoleHost` asks in the terminal as before. Tested with a scripted Pi and a clock that
+  doesn't wait; checked with an update of the test Pi and a flash booted in a Pi 2.
+- **The card job**: everything is asked for as the user first (the card, the settings, then the confirmation, so
+  nothing is asked once writing starts), and the user's SSH key and the Pi's host key are made as the user. Only
+  `CardJob` needs administrator rights: it checks the card is still the one chosen (the same disk, reader and size,
+  still a card in a card reader), writes and checks the image, writes the settings, and ejects the card. `juggle`
+  starts itself for it as `juggle card-job`: on Windows through UAC, in no window of its own, over a named pipe
+  that only this user can open and that only the process just started may use (its process ID is checked); on Linux
+  through `sudo` (the app: `pkexec`) over its input and output, which both pass through, so no pipe is needed there.
+  The request (with the Wi-Fi password and host key) and what the job reports go as lines of JSON. `devices.json`
+  and known_hosts are written as the user once the card is done. Ejecting on Windows locks each volume (retrying
+  while Explorer, AutoPlay or a virus scanner has a new card open, then dismounting it anyway), writes it out,
+  dismounts it and ejects the media; `juggle setup` ejects without administrator rights. On Linux it syncs,
+  unmounts and runs `eject` (as a user, `udisksctl`); without them it's still safe to take out. `--no-eject` leaves
+  the card in. With Wi-Fi saved, `-` chooses Ethernet only (Enter takes the saved network).
+
 ### 6. Check the test Pi
 
 What's listening, memory and CPU at rest, boot time, and pulling the power while it runs (repeatedly).

@@ -1,59 +1,45 @@
 namespace Juggle.Core.Jobs;
 
 /// <summary>
-/// Writes the Juggle OS image to a card in a card reader, checks it, then sets it up (<see cref="SetupJob"/>). Needs
-/// administrator rights (root on Linux). Only cards in card readers are offered, and the host confirms before writing.
+/// Flashes a card in a card reader: asks which card and the Pi's settings, confirms, then has the card job (with
+/// administrator rights) write the image, check it, put the settings on it and eject it. Only cards in card readers are
+/// offered, and the host confirms, naming the card, before anything is written.
 /// </summary>
-public sealed class FlashJob(IJobHost host, SetupJob setup,
-    Func<IReadOnlyList<RemovableDisk>>? findDisks = null,
-    Action<RemovableDisk, string, IProgress<WriteProgress>>? write = null,
-    Func<RemovableDisk, BootPartition?>? waitForBootPartition = null)
+public sealed class FlashJob(IJobHost host, SetupJob setup, ICardJob cardJob, ICards? cards = null)
 {
-    readonly Func<IReadOnlyList<RemovableDisk>> findDisks = findDisks ?? RemovableDisk.FindAll;
-    readonly Action<RemovableDisk, string, IProgress<WriteProgress>> write = write ?? ImageWriter.Write;
-    readonly Func<RemovableDisk, BootPartition?> waitForBootPartition = waitForBootPartition ?? BootPartition.WaitFor;
+    readonly ICards cards = cards ?? SystemCards.Instance;
 
-    /// <summary>Writes the image (a full path, see <see cref="ImageSource"/>) and sets the card up. Returns whether it did.</summary>
-    public bool Run(string image)
+    /// <summary>
+    /// Writes the image (a full path, see <see cref="ImageSource"/>) and sets the card up, ejecting it after if eject.
+    /// Returns whether it did.
+    /// </summary>
+    public bool Run(string image, bool eject)
     {
         host.Say($"Image: {Path.GetFileName(image)}");
-        var disks = findDisks();
+        var disks = cards.FindAll();
         if (disks.Count == 0)
         {
             host.Problem("No card found: put the card in the card reader and try again.");
             return false;
         }
         var disk = host.ChooseDisk(disks);
+        if (setup.Prepare(null) is not { } plan)
+        {
+            return false;
+        }
         if (!host.ConfirmErase(disk))
         {
             host.Say("Stopped: nothing was written.");
             return false;
         }
 
-        if (BlockMap.ForImage(image) is { } map)
+        var outcome = cardJob.Run(new CardRequest(disk, image, plan.Settings, eject));
+        if (outcome == CardOutcome.Failed)
         {
-            host.Say($"Writing {map.MappedBytes / (1 << 20)} MiB of the {map.ImageSize / (1 << 20)} MiB image " +
-                "(the rest is empty space), then reading it back to check it.");
-        }
-        try
-        {
-            write(disk, image, new DirectProgress<WriteProgress>(progress => host.Progress(
-                new JobProgress(progress.Verifying ? JobStage.Check : JobStage.Write, progress.Bytes, progress.Total))));
-        }
-        finally
-        {
-            host.Progress(null);
-        }
-        host.Say("Written and checked.");
-
-        using var card = waitForBootPartition(disk);
-        if (card is null)
-        {
-            host.Problem("The system didn't show the card's boot partition: take the card out, put it back in and run " +
-                "juggle setup.");
             return false;
         }
-        return setup.Run(null, card);
+        setup.Finish(plan, outcome);
+        return true;
     }
 }
 

@@ -1,10 +1,10 @@
 namespace Juggle.Core.Jobs;
 
 /// <summary>
-/// Whoever runs a job: juggle in a terminal, or Juggle Flash in its window. A job tells it what's happening and asks it
-/// for each decision, with one method per decision, so a window can show a screen for each.
+/// Where a job reports what's happening: the host that runs it, or (for the job with administrator rights) the stream
+/// back to it.
 /// </summary>
-public interface IJobHost
+public interface IJobReport
 {
     /// <summary>Something that happened, or what comes next. An empty line separates parts of a long output.</summary>
     void Say(string text);
@@ -14,8 +14,15 @@ public interface IJobHost
 
     /// <summary>How far the job has got, replacing the last progress; null when that stage is over.</summary>
     void Progress(JobProgress? progress);
+}
 
-    /// <summary>Which of the cards in card readers to write to (there are some).</summary>
+/// <summary>
+/// Whoever runs a job: juggle in a terminal, or Juggle Flash in its window. A job tells it what's happening and asks it
+/// for each decision, with one method per decision, so a window can show a screen for each.
+/// </summary>
+public interface IJobHost : IJobReport
+{
+    /// <summary>Which of the cards in card readers to write to, or to set up (there are some).</summary>
     RemovableDisk ChooseDisk(IReadOnlyList<RemovableDisk> disks);
 
     /// <summary>Whether to erase this card and write the image to it.</summary>

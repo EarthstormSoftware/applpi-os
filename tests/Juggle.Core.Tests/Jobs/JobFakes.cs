@@ -36,6 +36,52 @@ sealed class FakeHost : IJobHost
     public bool CreateSshKey(string publicKeyFile) => CreateKey(publicKeyFile);
 }
 
+/// <summary>Card readers with the cards the test gives, writing nothing.</summary>
+sealed class FakeCards : ICards
+{
+    public static readonly RemovableDisk Disk = new("2", "Card Reader", 16_000_000_000, [], []);
+
+    public List<RemovableDisk> Disks { get; set; } = [Disk];
+    public BootPartition? BootPartition { get; set; }
+    public List<(RemovableDisk Disk, string Image)> Written { get; } = [];
+    public List<RemovableDisk> Ejected { get; } = [];
+
+    /// <summary>Why ejecting fails, or null if it works.</summary>
+    public string? EjectFails { get; set; }
+
+    public IReadOnlyList<RemovableDisk> FindAll() => Disks;
+
+    public void Write(RemovableDisk disk, string image, IProgress<WriteProgress> progress)
+    {
+        Written.Add((disk, image));
+        progress.Report(new WriteProgress(false, 1 << 19, 1 << 20));
+        progress.Report(new WriteProgress(true, 1 << 20, 1 << 20));
+    }
+
+    public BootPartition? FindBootPartition(RemovableDisk disk, bool wait) => BootPartition;
+
+    public void Eject(RemovableDisk disk)
+    {
+        if (EjectFails is { } why)
+        {
+            throw new IOException(why);
+        }
+        Ejected.Add(disk);
+    }
+}
+
+/// <summary>A card job that keeps the request and ends as the test says.</summary>
+sealed class FakeCardJob(CardOutcome outcome = CardOutcome.Ejected) : ICardJob
+{
+    public List<CardRequest> Requests { get; } = [];
+
+    public CardOutcome Run(CardRequest request)
+    {
+        Requests.Add(request);
+        return outcome;
+    }
+}
+
 /// <summary>Time that passes only when the job sleeps.</summary>
 sealed class FakeClock : IClock
 {

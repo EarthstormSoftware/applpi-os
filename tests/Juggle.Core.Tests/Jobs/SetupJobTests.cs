@@ -13,6 +13,8 @@ public sealed class SetupJobTests : IDisposable
     readonly JugglePaths paths;
     readonly BootPartition card;
     readonly FakeHost host = new();
+    readonly FakeCards cards = new();
+    readonly FakeCardJob cardJob = new();
     int hostKeysMade;
 
     public SetupJobTests()
@@ -28,7 +30,48 @@ public sealed class SetupJobTests : IDisposable
     {
         hostKeysMade++;
         return (HostKey, $"ssh-ed25519 AAAAhost{hostKeysMade}");
-    });
+    }, cards);
+
+    bool Run(string? name, params BootPartition[] found) => Job().Run(name, found, [], cardJob, eject: false);
+
+    [Fact]
+    public void EjectsTheCardWhenAsked()
+    {
+        var onDisk = new BootPartition(card.Root, "test card", disk: FakeCards.Disk);
+
+        Assert.True(Job().Run(null, [onDisk], [], cardJob, eject: true));
+
+        Assert.Equal([FakeCards.Disk], cards.Ejected);
+        Assert.Contains(host.Said, line => line.StartsWith("The card is ejected: take it out"));
+    }
+
+    [Fact]
+    public void ACardNotInACardReaderIsntEjected()
+    {
+        Assert.True(Job().Run(null, [card], [], cardJob, eject: true));
+
+        Assert.Empty(cards.Ejected);
+        Assert.Contains(host.Said, line => line.StartsWith("Eject the card, put it in the Pi"));
+    }
+
+    [Fact]
+    public void ACardOnlyRootCanMountGoesToTheCardJob()
+    {
+        Assert.True(Job().Run(null, [], [FakeCards.Disk], cardJob, eject: true));
+
+        var request = Assert.Single(cardJob.Requests);
+        Assert.Null(request.Image);
+        Assert.Equal(FakeCards.Disk, request.Disk);
+        Assert.Equal("juggle-test", request.Settings.Hostname);
+        Assert.Equal("juggle-test", DeviceStore.Load(paths.DeviceStore).LastDevice);
+    }
+
+    [Fact]
+    public void RemembersNothingIfTheCardJobFailed()
+    {
+        Assert.False(Job().Run(null, [], [FakeCards.Disk], new FakeCardJob(CardOutcome.Failed), eject: true));
+        Assert.False(File.Exists(paths.DeviceStore));
+    }
 
     JsonElement CardSettings() =>
         JsonDocument.Parse(File.ReadAllText(Path.Combine(card.Root, "juggle.json"))).RootElement;
@@ -38,7 +81,7 @@ public sealed class SetupJobTests : IDisposable
     {
         host.Settings = new SettingsAnswers("Juggle-Test", "Europe/London", new WifiSettings("GB", "Home", "password1"));
 
-        Assert.True(Job().Run(null, card));
+        Assert.True(Run(null, card));
 
         Assert.Equal("juggle-test", CardSettings().GetProperty("hostname").GetString());
         var stored = DeviceStore.Load(paths.DeviceStore);
@@ -53,8 +96,8 @@ public sealed class SetupJobTests : IDisposable
     [Fact]
     public void APiSetUpAgainKeepsItsHostKey()
     {
-        Assert.True(Job().Run(null, card));
-        Assert.True(Job().Run(null, card));
+        Assert.True(Run(null, card));
+        Assert.True(Run(null, card));
 
         Assert.Equal(1, hostKeysMade);
         Assert.Equal(["juggle-test.local ssh-ed25519 AAAAhost1"], File.ReadAllLines(paths.KnownHosts));
@@ -64,9 +107,9 @@ public sealed class SetupJobTests : IDisposable
     public void ANewPiStartsFromTheLastPisSettings()
     {
         host.Settings = new SettingsAnswers("first-pi", "America/New_York", new WifiSettings("US", "Home", "password1"));
-        Assert.True(Job().Run(null, card));
+        Assert.True(Run(null, card));
 
-        Assert.True(Job().Run(null, card));
+        Assert.True(Run(null, card));
 
         Assert.Equal("first-pi", host.Form!.Hostname);
         var defaults = host.Form.DefaultsFor("second-pi");
@@ -78,14 +121,14 @@ public sealed class SetupJobTests : IDisposable
     [Fact]
     public void ANameGivenIsOfferedInLowerCase()
     {
-        Assert.True(Job().Run("Kitchen", card));
+        Assert.True(Run("Kitchen", card));
         Assert.Equal("kitchen", host.Form!.Hostname);
     }
 
     [Fact]
     public void WithoutWifiItSaysToUseACable()
     {
-        Assert.True(Job().Run(null, card));
+        Assert.True(Run(null, card));
         Assert.Contains("No Wi-Fi: connect the Pi with an Ethernet cable.", host.Said);
         Assert.False(CardSettings().TryGetProperty("wifi", out _));
     }
@@ -95,7 +138,7 @@ public sealed class SetupJobTests : IDisposable
     {
         File.WriteAllText(paths.PublicKey, "not a key\n");
 
-        Assert.False(Job().Run(null, card));
+        Assert.False(Run(null, card));
 
         Assert.Single(host.Problems);
         Assert.False(card.HasPendingSettings);
@@ -114,7 +157,7 @@ public sealed class SetupJobTests : IDisposable
             return false;
         };
 
-        Assert.False(Job().Run(null, card));
+        Assert.False(Run(null, card));
 
         Assert.Equal(paths.PublicKey, asked);
         Assert.False(card.HasPendingSettings);
@@ -126,7 +169,7 @@ public sealed class SetupJobTests : IDisposable
         File.WriteAllText(Path.Combine(card.Root, "juggle-release.txt"), "VERSION=v0.7.0\nBUILD_STAMP=20261030-1200\n");
         File.WriteAllText(Path.Combine(card.Root, "juggle-error.txt"), "bad time zone\n");
 
-        Assert.True(Job().Run(null, card));
+        Assert.True(Run(null, card));
 
         Assert.Contains("Image: Juggle OS v0.7.0, build 20261030-1200 UTC", host.Said);
         Assert.Contains("The Pi left a message on this card about the last settings: bad time zone", host.Said);
@@ -135,7 +178,7 @@ public sealed class SetupJobTests : IDisposable
     [Fact]
     public void WithoutACardItStops()
     {
-        Assert.False(Job().Run(null, []));
+        Assert.False(Run(null));
         Assert.StartsWith("No Juggle card found.", Assert.Single(host.Problems));
     }
 
@@ -144,7 +187,7 @@ public sealed class SetupJobTests : IDisposable
     {
         var other = new BootPartition(Directory.CreateDirectory(Path.Combine(dir, "other")).FullName, "other card");
 
-        Assert.True(Job().Run(null, [card, other]));
+        Assert.True(Run(null, card, other));
 
         Assert.True(other.HasPendingSettings);
         Assert.False(card.HasPendingSettings);

@@ -155,9 +155,10 @@ sealed class ConsoleHost : IJobHost
     static WifiSettings? AskWifi(SettingsDefaults defaults)
     {
         var known = defaults.Wifi;
-        var ssid = Ask("Wi-Fi network (leave empty for Ethernet only)", known?.Ssid,
-            answer => answer.Length == 0 ? null : SettingsRules.CheckSsid(answer), allowEmpty: true);
-        if (ssid.Length == 0)
+        // Enter takes the network offered, so with one offered, - is none
+        var ssid = Ask(known is null ? "Wi-Fi network (leave empty for Ethernet only)" : "Wi-Fi network (- for Ethernet only)",
+            known?.Ssid, answer => answer is "" or "-" ? null : SettingsRules.CheckSsid(answer), allowEmpty: true);
+        if (ssid is "" or "-")
         {
             return null;
         }

@@ -4,7 +4,8 @@ namespace Juggle.Core;
 /// The boot partition of a card written with the Juggle OS image (FAT): a drive letter on Windows, a mount point on
 /// Linux. One juggle mounted itself (on Linux, as root) is unmounted when it's disposed, or by <see cref="ReleaseAll"/>.
 /// </summary>
-public sealed class BootPartition(string root, string description, Action? release = null, string? name = null) : IDisposable
+public sealed class BootPartition(string root, string description, Action? release = null, string? name = null,
+    RemovableDisk? disk = null) : IDisposable
 {
     const string SettingsFile = "juggle.json";
     const string ErrorFile = "juggle-error.txt";
@@ -18,6 +19,9 @@ public sealed class BootPartition(string root, string description, Action? relea
 
     /// <summary>What to call it in a message: its root, or the device of one mounted in a temporary folder.</summary>
     public string Name { get; } = name ?? root;
+
+    /// <summary>The card it's on, to eject it, or null if it isn't a card in a card reader.</summary>
+    public RemovableDisk? Disk { get; } = disk;
 
     /// <summary>What to show the user: the drive letter or device, and the partition's size or mount point.</summary>
     public string Description { get; } = description;
@@ -97,38 +101,43 @@ public sealed class BootPartition(string root, string description, Action? relea
     {
         if (OperatingSystem.IsWindows())
         {
+            var disks = RemovableDisk.FindAll();
             return DriveInfo.GetDrives()
                 .Where(drive => drive.DriveType == DriveType.Removable && drive.IsReady)
                 .Where(drive => drive.VolumeLabel == Label && IsJuggle(drive.RootDirectory.FullName))
                 .Select(drive => new BootPartition(drive.RootDirectory.FullName,
-                    $"{drive.Name.TrimEnd('\\')} (boot partition, {drive.TotalSize / (1024 * 1024)} MB)"))
+                    $"{drive.Name.TrimEnd('\\')} (boot partition, {drive.TotalSize / (1024 * 1024)} MB)",
+                    disk: disks.FirstOrDefault(disk => disk.Volumes.Contains(drive.Name.TrimEnd('\\'), StringComparer.OrdinalIgnoreCase))))
                 .ToList();
         }
         var cards = new List<BootPartition>();
-        foreach (var partition in RemovableDisk.FindAll().SelectMany(disk => disk.Partitions).Where(part => part.Label == Label))
+        foreach (var disk in RemovableDisk.FindAll())
         {
-            if (partition.MountPoint is { } mounted)
+            foreach (var partition in disk.Partitions.Where(part => part.Label == Label))
             {
-                if (IsJuggle(mounted))
+                if (partition.MountPoint is { } mounted)
                 {
-                    cards.Add(new BootPartition(mounted, $"{partition.Device} (boot partition, at {mounted})"));
+                    if (IsJuggle(mounted))
+                    {
+                        cards.Add(new BootPartition(mounted, $"{partition.Device} (boot partition, at {mounted})", disk: disk));
+                    }
                 }
-            }
-            else if (Platform.IsAdministrator && Mount(partition.Device) is { } card)
-            {
-                cards.Add(card);
+                else if (Platform.IsAdministrator && Mount(partition.Device, disk) is { } card)
+                {
+                    cards.Add(card);
+                }
             }
         }
         return cards;
     }
 
     /// <summary>
-    /// How many cards' boot partitions aren't mounted (Linux): run as a user, juggle can't mount them, so it runs itself
-    /// again with sudo.
+    /// The cards whose boot partitions aren't mounted (Linux): run as a user, juggle can't mount them, so a job with
+    /// root's rights sets them up.
     /// </summary>
-    public static int UnmountedCards() => OperatingSystem.IsWindows()
-        ? 0
-        : RemovableDisk.FindAll().SelectMany(disk => disk.Partitions).Count(part => part.Label == Label && part.MountPoint is null);
+    public static IReadOnlyList<RemovableDisk> UnmountedCards() => OperatingSystem.IsWindows()
+        ? []
+        : RemovableDisk.FindAll().Where(disk => disk.Partitions.Any(part => part.Label == Label && part.MountPoint is null)).ToList();
 
     /// <summary>
     /// The boot partition of a card just written, once the system has found it (and on Linux, mounted here), or null
@@ -138,34 +147,44 @@ public sealed class BootPartition(string root, string description, Action? relea
     {
         for (var attempt = 0; attempt < 30; attempt++)
         {
-            var now = RemovableDisk.FindAll().FirstOrDefault(candidate => candidate.Id == disk.Id);
-            if (OperatingSystem.IsWindows())
+            if (Find(disk) is { } card)
             {
-                var root = (now?.Volumes ?? []).Select(letter => $@"{letter}\").FirstOrDefault(IsJuggle);
-                if (root is not null)
-                {
-                    return new BootPartition(root, $"{root.TrimEnd('\\')} (boot partition)");
-                }
-            }
-            else if (now?.Partitions.FirstOrDefault(part => part.Label == Label) is { } partition)
-            {
-                // A desktop may mount it as soon as it appears
-                if (partition.MountPoint is { } mounted && IsJuggle(mounted))
-                {
-                    return new BootPartition(mounted, $"{partition.Device} (boot partition, at {mounted})");
-                }
-                if (partition.MountPoint is null && Mount(partition.Device) is { } card)
-                {
-                    return card;
-                }
+                return card;
             }
             Thread.Sleep(1000);
         }
         return null;
     }
 
+    /// <summary>
+    /// The boot partition of the Juggle card on a disk (on Linux, mounted here if it isn't mounted, which needs root),
+    /// or null if there isn't one.
+    /// </summary>
+    public static BootPartition? Find(RemovableDisk disk)
+    {
+        var now = RemovableDisk.FindAll().FirstOrDefault(candidate => candidate.Id == disk.Id);
+        if (OperatingSystem.IsWindows())
+        {
+            var root = (now?.Volumes ?? []).Select(letter => $@"{letter}\").FirstOrDefault(IsJuggle);
+            return root is null ? null : new BootPartition(root, $"{root.TrimEnd('\\')} (boot partition)", disk: now);
+        }
+        if (now?.Partitions.FirstOrDefault(part => part.Label == Label) is { } partition)
+        {
+            // A desktop may mount it as soon as it appears
+            if (partition.MountPoint is { } mounted && IsJuggle(mounted))
+            {
+                return new BootPartition(mounted, $"{partition.Device} (boot partition, at {mounted})", disk: now);
+            }
+            if (partition.MountPoint is null)
+            {
+                return Mount(partition.Device, now);
+            }
+        }
+        return null;
+    }
+
     /// <summary>Mounts a partition (Linux, as root) in a new temporary folder, if it's a Juggle card's boot partition.</summary>
-    static BootPartition? Mount(string device)
+    static BootPartition? Mount(string device, RemovableDisk disk)
     {
         var folder = Directory.CreateTempSubdirectory("juggle-boot-").FullName;
         try
@@ -187,7 +206,7 @@ public sealed class BootPartition(string root, string description, Action? relea
             Unmount();
             return null;
         }
-        var card = new BootPartition(folder, $"{device} (boot partition)", Unmount, device);
+        var card = new BootPartition(folder, $"{device} (boot partition)", Unmount, device, disk);
         lock (Mounted)
         {
             Mounted.Add(card);
