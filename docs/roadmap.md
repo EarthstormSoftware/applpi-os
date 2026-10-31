@@ -369,6 +369,16 @@ Done (2026-10-31):
   `devices.json`) is the one new Pis start from in `juggle` too, whichever was set up last. Console programs the
   app starts (ssh, ssh-keygen) get no window of their own. An unreachable Pi is said to be one. Without an SSH key,
   the app shows the `ssh-keygen` command to run rather than asking for its passphrase itself.
+- **Packaging**: `src\Juggle.Flash\publish.ps1` publishes `juggle-flash` and `juggle` beside it, one self-contained
+  file each, as `juggle-flash-<version>-win-x64.zip` (about 78 MiB) or `-linux-x64.tar.gz` (about 73 MiB). The icon
+  is drawn from `juggle-os-icon.svg` (`Assets`: an .ico for the program, PNGs for the window, light and dark as the
+  theme). The image workflow builds both after the tests, Windows on Windows (for the icon) and Linux on Linux (for
+  the executable bits); a tag's draft release has them with the image, under one `SHA256SUMS`. Checked: the Windows
+  build runs; the Linux build in WSL2's Debian (WSLg, which needed fontconfig and X11's libraries installed, as a
+  desktop has) flashed v0.7.0 downloaded from GitHub to a card in the reader passed through with usbipd, through
+  `pkexec`, with polkit's `pkttyagent` asking for the password (WSLg has no desktop agent), settings and all.
+  Without `pkexec`, it says what to install; when the job with root's rights stops without saying why, its last
+  words (pkexec's or sudo's) are shown.
 
 ### 6. Check the test Pi
 

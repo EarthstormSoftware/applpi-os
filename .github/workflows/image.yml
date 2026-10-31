@@ -1,7 +1,7 @@
-# Builds the Juggle OS image in the same container as image\build.ps1 (a full build, as for any release).
-# A tag (vX.Y.Z) makes a draft release with the image, its .bmap and SHA256SUMS, for its notes to be written and then
-# published; juggle flash and update download published releases. Run by hand (on any branch), the image is kept as a
-# test build for a few days instead.
+# Builds the Juggle OS image in the same container as image\build.ps1 (a full build, as for any release), and Juggle
+# Flash for Windows and Linux (x64), with juggle beside it, after the tests. A tag (vX.Y.Z) makes a draft release with
+# the image, its .bmap, Juggle Flash and SHA256SUMS, for its notes to be written and then published; juggle flash and
+# update download published releases. Run by hand (on any branch), they're kept as a test build for a few days instead.
 name: Image
 
 on:
@@ -41,8 +41,7 @@ jobs:
           sha256sum "juggle-os-$VERSION.img.xz" "juggle-os-$VERSION.bmap" > SHA256SUMS
           cat SHA256SUMS
 
-      - name: Keep a test build
-        if: github.ref_type != 'tag'
+      - name: Keep the image
         uses: actions/upload-artifact@v4
         with:
           name: juggle-os-${{ env.VERSION }}
@@ -53,11 +52,65 @@ jobs:
             deploy/*.info
           retention-days: 7
 
+  flash:
+    name: Juggle Flash (${{ matrix.runtime }})
+    strategy:
+      matrix:
+        include:
+          # Each on its own system: Windows gives the program its icon, Linux keeps the executable bits
+          - runtime: win-x64
+            os: windows-latest
+          - runtime: linux-x64
+            os: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the tags, for the version
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Test
+        run: dotnet test Juggle.slnx
+
+      - name: Publish
+        shell: pwsh
+        run: ./src/Juggle.Flash/publish.ps1 -Runtime ${{ matrix.runtime }}
+
+      - name: Keep it
+        uses: actions/upload-artifact@v4
+        with:
+          name: juggle-flash-${{ matrix.runtime }}
+          path: |
+            deploy/juggle-flash-*.zip
+            deploy/juggle-flash-*.tar.gz
+          retention-days: 7
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [build, flash]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: deploy
+          merge-multiple: true
+
       - name: Draft the release
-        if: github.ref_type == 'tag'
+        working-directory: deploy
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.ref_name }}
         run: |
+          files=("juggle-os-$VERSION.img.xz" "juggle-os-$VERSION.bmap" juggle-flash-"$VERSION"-*)
+          ls -l "${files[@]}"
+          sha256sum "${files[@]}" > SHA256SUMS
+          cat SHA256SUMS
           gh release create "$VERSION" --draft --verify-tag --title "Juggle OS $VERSION" \
-            --notes "Images for Raspberry Pis (32-bit, armhf). Write one with \`juggle flash $VERSION\`, which checks it against SHA256SUMS." \
-            "deploy/juggle-os-$VERSION.img.xz" "deploy/juggle-os-$VERSION.bmap" deploy/SHA256SUMS
+            --notes "Images for Raspberry Pis (32-bit, armhf), and Juggle Flash for Windows and Linux (x64), which writes them to a card with a Pi's settings (juggle, the command line, is beside it). Write an image with Juggle Flash, or with \`juggle flash $VERSION\`, which checks it against SHA256SUMS." \
+            "${files[@]}" SHA256SUMS

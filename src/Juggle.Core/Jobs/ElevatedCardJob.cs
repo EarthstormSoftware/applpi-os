@@ -31,16 +31,38 @@ public sealed partial class ElevatedCardJob(IJobReport report, string program, I
             UseShellExecute = false,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
+            // Why it stopped, if it does (sudo asks for the password on the terminal itself, not here)
+            RedirectStandardError = true,
         };
         foreach (var arg in (string[])[program, .. arguments, "card-job", "--stdio"])
         {
             start.ArgumentList.Add(arg);
         }
-        using var job = Process.Start(start) ?? throw new InvalidOperationException($"{linuxElevator} didn't start.");
+        Process? started;
+        try
+        {
+            started = Process.Start(start);
+        }
+        catch (Win32Exception)
+        {
+            report.Problem($"{why} needs root, which juggle asks for with {linuxElevator}, but it isn't installed " +
+                $"(on Debian or Ubuntu, the {linuxElevator} package): nothing was written.");
+            return CardOutcome.Failed;
+        }
+        using var job = started ?? throw new InvalidOperationException($"{linuxElevator} didn't start.");
+        string? said = null;
+        job.ErrorDataReceived += (_, line) =>
+        {
+            if (line.Data is { Length: > 0 } text)
+            {
+                said = text.Trim();
+            }
+        };
+        job.BeginErrorReadLine();
         var outcome = CardJobStream.Relay(request, job.StandardInput.BaseStream, job.StandardOutput.BaseStream, report);
         job.StandardInput.Close();
         job.WaitForExit();
-        return Ended(outcome, job.ExitCode);
+        return Ended(outcome, job.ExitCode, said);
     }
 
     [SupportedOSPlatform("windows")]
@@ -92,13 +114,16 @@ public sealed partial class ElevatedCardJob(IJobReport report, string program, I
         }
     }
 
-    CardOutcome Ended(CardOutcome? outcome, int exitCode)
+    /// <summary>How the job ended; if it didn't say, what it (or sudo or pkexec) said last, if anything.</summary>
+    CardOutcome Ended(CardOutcome? outcome, int exitCode, string? said = null)
     {
         if (outcome is { } ended)
         {
             return ended;
         }
-        report.Problem($"juggle with administrator rights stopped without finishing (exit code {exitCode}).");
+        var rights = OperatingSystem.IsWindows() ? "administrator rights" : $"root's rights ({linuxElevator})";
+        report.Problem($"juggle with {rights} stopped without finishing (exit code {exitCode})" +
+            (said is null ? "." : $": {said.TrimEnd('.')}."));
         return CardOutcome.Failed;
     }
 

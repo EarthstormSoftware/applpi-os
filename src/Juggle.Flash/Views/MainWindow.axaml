@@ -11,7 +11,7 @@
     <Border DockPanel.Dock="Top" Padding="20,14" BorderThickness="0,0,0,1"
             BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}">
       <StackPanel Orientation="Horizontal" Spacing="14">
-        <views:Logo Width="48" Height="30" />
+        <views:Logo Width="56" Height="42" />
         <StackPanel VerticalAlignment="Center">
           <TextBlock Text="Juggle Flash" FontSize="20" FontWeight="SemiBold" />
           <TextBlock Text="{Binding Version}" FontSize="12" Opacity="0.6" />

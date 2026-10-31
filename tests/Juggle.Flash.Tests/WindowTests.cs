@@ -47,6 +47,19 @@ public class WindowTests
     }
 
     [AvaloniaFact]
+    public void TheIconFollowsTheTheme()
+    {
+        var window = Show(new MainWindowViewModel());
+        var light = window.Icon;
+
+        window.RequestedThemeVariant = Avalonia.Styling.ThemeVariant.Dark;
+
+        Assert.NotNull(light);
+        Assert.NotNull(window.Icon);
+        Assert.NotSame(light, window.Icon);
+    }
+
+    [AvaloniaFact]
     public void ProblemsAreShownInTheirOwnColour()
     {
         var job = new JobViewModel("Update kitchen", action => action());

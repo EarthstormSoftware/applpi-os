@@ -111,6 +111,21 @@ public sealed class CardJobTests : IDisposable
     }
 
     [Fact]
+    public void SaysWhatToInstallWithoutTheProgramForRootsRights()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;  // Windows asks through UAC
+        }
+
+        var outcome = new ElevatedCardJob(host, "juggle", [], linuxElevator: "no-such-pkexec")
+            .Run(new CardRequest(FakeCards.Disk, image, Settings, true));
+
+        Assert.Equal(CardOutcome.Failed, outcome);
+        Assert.Contains("the no-such-pkexec package", Assert.Single(host.Problems));
+    }
+
+    [Fact]
     public void ReportsAJobThatEndsWithoutSaying()
     {
         using var nothing = new MemoryStream();

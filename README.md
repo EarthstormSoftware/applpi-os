@@ -33,8 +33,10 @@ as a Pico W, with Python, the network, USB and GPIO.
 
 - A Raspberry Pi 2 and a microSD card of 4 GB or more (the card is laid out on first boot: two OS slots and a data
   partition filling the rest).
-- Windows 10 or 11 with the [.NET 10 SDK](https://dotnet.microsoft.com/download), Windows' OpenSSH client (`ssh`,
-  `ssh-keygen`, `scp`; installed by default) and a card reader. Or Linux: see [On Linux](#on-linux).
+- Windows 10 or 11 with Windows' OpenSSH client (`ssh`, `ssh-keygen`, `scp`; installed by default) and a card
+  reader, and either [Juggle Flash](#with-juggle-flash) from a release or the
+  [.NET 10 SDK](https://dotnet.microsoft.com/download) to run `juggle` from this repository. Or Linux: see
+  [On Linux](#on-linux).
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/), only to build the image yourself: the
   [releases](https://github.com/EarthstormSoftware/juggle-os/releases) have ready-made images.
 
@@ -53,15 +55,31 @@ dotnet run --project src\Juggle.Cli -- flash
 ```
 
 It writes the newest image you've built in `deploy\`, or else the latest release (`flash latest` or `flash v0.7.0`
-picks a release, downloaded and checked against its `SHA256SUMS`), to the card (only card readers are offered, and
-you type ERASE to confirm) and checks it, writing only the blocks that hold data. Then it asks for the Pi's name,
-Wi-Fi and time zone (the last Pi's are offered), makes you an SSH key if you don't have one, and puts the settings
-on the card. It also gives each Pi its own SSH host key, kept with its settings and added to your `known_hosts`, so
-a reflashed Pi keeps its identity and ssh never warns or asks about it. Boot the Pi with the card and, after a few
-minutes, `ssh juggle@<name>.local`.
+picks a release, downloaded and checked against its `SHA256SUMS`), to a card in a card reader (only card readers
+are offered). First it asks for the Pi's name, Wi-Fi and time zone (the default Pi's are offered, see below), and
+makes you an SSH key if you don't have one; then you type ERASE to confirm, and only writing the card asks for
+administrator rights. It writes and checks the image (only the blocks that hold data), puts the settings on the
+card and ejects it safely (`--no-eject` leaves it in). It also gives each Pi its own SSH host key, kept with its
+settings and added to your `known_hosts`, so a reflashed Pi keeps its identity and ssh never warns or asks about it.
+Boot the Pi with the card and, after a few minutes, `ssh juggle@<name>.local`.
 
 Settings are kept in `%APPDATA%\Juggle`, Wi-Fi passwords and host keys encrypted for your Windows account: never in
-this repository, and never in the image.
+this repository, and never in the image. A new Pi starts from the default Pi's settings: the one you chose with
+`juggle default <name>` (or Use as default in Juggle Flash), or else the last one set up.
+
+### With Juggle Flash
+
+Juggle Flash does the same in a window, on Windows and Linux (x64): flash a card (the latest release, another
+version or a file), set up a card that already has Juggle OS, and the Pis you've set up, each to update, forget or
+use as the default. Releases after v0.7.0 have it ready to run: `juggle-flash-<version>-win-x64.zip` and
+`-linux-x64.tar.gz`, one program each with `juggle` beside it, as it writes cards with `juggle` (started with
+administrator rights for that alone: Windows asks, through UAC). They aren't code-signed, so Windows' SmartScreen
+warns the first time. To build them yourself, run `.\src\Juggle.Flash\publish.ps1 -Runtime win-x64` (or `linux-x64`,
+on Linux). If your SSH key has a passphrase, add it to ssh-agent (`ssh-add`) for Juggle Flash's updates: it has no
+terminal for ssh to ask in.
+
+On Linux, Juggle Flash needs a desktop's usual libraries (fontconfig and X11's) and `pkexec`, which asks for your
+password with the desktop's own prompt before writing a card.
 
 ### On Linux
 
@@ -72,8 +90,8 @@ SDK, as one self-contained file that needs no .NET on the Linux machine:
 dotnet publish src/Juggle.Cli -r linux-x64 --self-contained -p:PublishSingleFile=true    # or -r linux-arm
 ```
 
-It works as on Windows, except that writing a card needs root, so `flash` and `setup` run themselves again with
-`sudo` (the settings, SSH key and `known_hosts` stay yours, in your home); card readers are found with `lsblk` (USB
+It works as on Windows, except that writing a card needs root, so `flash` and `setup` run `juggle` again with
+`sudo` for that alone (the settings, SSH key and `known_hosts` stay yours, in your home); card readers are found with `lsblk` (USB
 disks with removable media, or an SD slot, never the disk the system runs from); `juggle` mounts the card's boot
 partition itself, so no desktop is needed; and settings are kept in `~/.config/juggle`, readable only by you, with
 Wi-Fi passwords and host keys not encrypted, as Linux has no per-user key like Windows' to encrypt them with.

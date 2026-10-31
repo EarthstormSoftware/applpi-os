@@ -9,6 +9,8 @@
     <RootNamespace>Juggle.Flash</RootNamespace>
     <Product>Juggle Flash</Product>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <!-- Juggle OS's icon (drawn from deploy\branding\juggle-os-icon.svg): the program's, and the window's -->
+    <ApplicationIcon>Assets\juggle-flash.ico</ApplicationIcon>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <!-- On Linux, without the ICU library, as juggle: only invariant formatting is needed -->
     <InvariantGlobalization Condition="$(RuntimeIdentifier.StartsWith('linux'))">true</InvariantGlobalization>
@@ -16,6 +18,10 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Juggle.Flash.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\juggle-flash.png;Assets\juggle-flash-dark.png" />
   </ItemGroup>
 
   <ItemGroup>
