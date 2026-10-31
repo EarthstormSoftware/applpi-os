@@ -6,7 +6,7 @@ namespace Juggle.Core;
 /// Runs commands on a Pi over SSH, as its admin user, with the system's OpenSSH (so the user's keys, agent and
 /// known_hosts work as they do for ssh itself).
 /// </summary>
-public sealed class PiShell(string host)
+public sealed class PiShell(string host) : IPi
 {
     public const string User = "juggle";
 
@@ -91,6 +91,18 @@ public sealed class PiShell(string host)
         }
         return output.Result;
     }
+}
+
+/// <summary>A Pi to run commands on: <see cref="PiShell"/>, or a scripted one in tests.</summary>
+public interface IPi
+{
+    string Host { get; }
+
+    /// <summary>Runs a command and returns what it printed. Its messages (stderr) go to onMessage, line by line.</summary>
+    string Run(string command, Action<string>? onMessage = null, int connectTimeoutSeconds = 15);
+
+    /// <summary>Runs a command with a file as its input, reporting how much of the file has been sent.</summary>
+    string Run(string command, string inputFile, IProgress<long> progress, Action<string>? onMessage = null);
 }
 
 /// <summary>A command on the Pi failed (or ssh couldn't reach it: exit code 255).</summary>
