@@ -4,7 +4,8 @@ namespace Juggle.Core.Tests;
 
 public class SlotStatusTests
 {
-    const string FreshCard = """
+    // As the Pi says it, with LF line ends, whatever git checked this file out with (CRLF on Windows)
+    static readonly string FreshCard = """
         boot=0b9c2f43-8f5d-4a71-9a0e-6f1f3c1d2e7a
         running=A
         tryboot=0
@@ -14,7 +15,7 @@ public class SlotStatusTests
         features=map
         slotA=v0.1.2 (build 20261025-1012)
         slotB=
-        """;
+        """.ReplaceLineEndings("\n");
 
     [Fact]
     public void ReadsTheSlots()
